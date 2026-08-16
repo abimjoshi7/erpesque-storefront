@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# erpesque-storefront
 
-## Getting Started
+Customer-facing shop for the erpesque ERP. Each ERP tenant gets a public catalog
+at `/{tenant_code}`, served from the items that tenant has published — there is
+no separate product database.
 
-First, run the development server:
+Next.js App Router, TypeScript, Tailwind. Reads the ERP's public `/storefront/*`
+endpoints; the ERP stays the only source of truth.
+
+## How it talks to the ERP
+
+Every ERP call happens on the server — in a server component or a route handler.
+The browser never reaches the API, which is why there is no CORS configuration
+here and no API key in any client bundle. `src/lib/erp.ts` opens with
+`import "server-only"`, so importing it from a client component fails the build
+instead of silently shipping the key to browsers.
+
+In production the request path is:
+
+    browser → this app (Cloudflare) → Worker (api.ghumtibags.com) → Rust origin
+
+The Worker's edge gate expects `X-Client-API-Key`. Locally there is no Worker, so
+the app talks to the Rust origin directly and sends `X-API-Key` instead. Set
+whichever one matches what you are pointing at — see `.env.example`.
+
+## Running it
+
+The ERP server must be running, and the tenant must have the storefront module
+enabled, or every page 404s by design.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local     # then fill in ERP_ORIGIN_API_KEY
+npm install
+npm run dev                    # http://localhost:3001/nsbs
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+A tenant that does not exist, one that is suspended, and one that has not enabled
+the module all return the same 404. That is deliberate: a distinguishable
+response would let anyone enumerate tenant codes.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## API types
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`src/types/erp-api.d.ts` is generated from the ERP's OpenAPI spec — never edit it
+by hand:
 
-## Learn More
+```bash
+npm run types:generate         # regenerate from ../erp/server/openapi.yaml
+npm run types:check            # regenerate and fail if the result differs
+```
 
-To learn more about Next.js, take a look at the following resources:
+`types:check` is what keeps this repo honest about the API contract now that it
+lives separately from the server. Point `ERP_OPENAPI` at another path or a URL to
+generate from somewhere else.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Scripts
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Development server |
+| `npm run build` | Production build |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run types:generate` | Regenerate API types from the OpenAPI spec |
+| `npm run types:check` | Fail if the generated types are stale |
 
-## Deploy on Vercel
+## Status
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Catalog listing, search, category filter, pagination, and product detail pages.
+Ordering is not built yet — cart, quote and checkout are the next slice, along
+with product images, stock badges and pricelist-resolved pricing.
