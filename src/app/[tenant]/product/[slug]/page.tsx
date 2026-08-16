@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
+import { AddToCart } from "@/components/add-to-cart";
+import { CartLink } from "@/components/cart-link";
 import { fetchProduct } from "@/lib/erp";
 import { formatPrice } from "@/lib/money";
 
@@ -38,12 +40,15 @@ export default async function ProductPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
-      <Link
-        href={`/${tenant}`}
-        className="text-sm text-neutral-600 underline underline-offset-4 dark:text-neutral-400"
-      >
-        ← {shop.name}
-      </Link>
+      <div className="flex items-baseline justify-between gap-4">
+        <Link
+          href={`/${tenant}`}
+          className="text-sm text-neutral-600 underline underline-offset-4 dark:text-neutral-400"
+        >
+          ← {shop.name}
+        </Link>
+        <CartLink tenant={tenant} />
+      </div>
 
       <article className="mt-8">
         {product.category ? (
@@ -68,11 +73,11 @@ export default async function ProductPage({ params }: PageProps) {
           </p>
         ) : null}
 
-        {/* Cart and checkout land in the next slice. Stating that is more
-            honest than a button that does nothing. */}
-        <p className="mt-10 rounded-md border border-dashed border-neutral-300 p-4 text-sm text-neutral-500 dark:border-neutral-700">
-          Ordering is not available yet.
-        </p>
+        <AddToCart
+          tenant={tenant}
+          slug={product.slug!}
+          disabled={product.priceMinor === null || product.priceMinor === undefined}
+        />
       </article>
     </main>
   );

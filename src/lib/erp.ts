@@ -35,6 +35,27 @@ export type CatalogQuery = {
   limit?: number;
 };
 
+export type Quote = {
+  tenant: Tenant;
+  lines: QuoteLine[];
+  subtotalMinor: number;
+  taxMinor: number;
+  totalMinor: number;
+  taxInclusivePricing?: boolean;
+};
+
+export type QuoteLine = components["schemas"]["StorefrontQuoteLine"];
+export type Contact = components["schemas"]["StorefrontContact"];
+
+export type CartLine = { slug: string; quantity: number };
+
+export type PlacedOrder = {
+  orderNumber: string;
+  statusToken: string;
+  totalMinor: number;
+  currency?: Tenant["currency"];
+};
+
 /**
  * Thrown for any non-2xx that is not a 404. Pages translate 404 into
  * `notFound()` and let everything else become an error boundary, so a shop
@@ -44,8 +65,15 @@ export class ErpError extends Error {
   constructor(
     readonly status: number,
     readonly path: string,
+    /**
+     * The ERP's own message when it explained itself — "'boot-polish' is no
+     * longer available". Worth surfacing verbatim: it is written for the
+     * shopper, and a generic "something went wrong" would hide the one detail
+     * that lets them fix their cart.
+     */
+    readonly detail?: string,
   ) {
-    super(`ERP responded ${status} for ${path}`);
+    super(detail ?? `ERP responded ${status} for ${path}`);
     this.name = "ErpError";
   }
 }
@@ -110,6 +138,56 @@ export async function fetchCatalog(
   if (query.limit) search.set("limit", String(query.limit));
 
   return get<Catalog>(`/storefront/${encodeURIComponent(tenantCode)}/catalog`, search);
+}
+
+/**
+ * Never cached, unlike `get`. A quote and an order are decisions about money,
+ * so they always read the live catalog even when the page the shopper came
+ * from was served from the edge a minute ago.
+ */
+async function post<T>(path: string, payload: unknown): Promise<T | null> {
+  const response = await fetch(`${baseUrl()}${path}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+
+  if (response.status === 404) return null;
+
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((body: { error?: string }) => body.error)
+      .catch(() => undefined);
+    throw new ErpError(response.status, path, detail);
+  }
+
+  const body = (await response.json()) as { data: T };
+  return body.data;
+}
+
+/**
+ * Prices a cart. Note what is *not* sent: the client holds slugs and
+ * quantities, and every amount comes back from the server. There is nowhere in
+ * this call for the browser's idea of a price to enter.
+ */
+export async function fetchQuote(
+  tenantCode: string,
+  lines: CartLine[],
+): Promise<Quote | null> {
+  return post<Quote>(`/storefront/${encodeURIComponent(tenantCode)}/quote`, { lines });
+}
+
+export async function placeOrder(
+  tenantCode: string,
+  payload: { lines: CartLine[]; contact: Contact; note?: string },
+): Promise<PlacedOrder | null> {
+  return post<PlacedOrder>(`/storefront/${encodeURIComponent(tenantCode)}/order`, payload);
 }
 
 export async function fetchProduct(

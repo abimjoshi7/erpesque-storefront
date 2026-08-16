@@ -10038,6 +10038,156 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/{tenantCode}/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Price a cart
+         * @description Unauthenticated, same tenant rules as the catalog endpoints.
+         *
+         *     The request carries slugs and quantities only. There is deliberately no
+         *     field for a price: rates, taxes and totals are derived from the database,
+         *     so a tampered request cannot buy anything at a discount. Any money value
+         *     sent is ignored rather than validated.
+         *
+         *     The storefront calls this on every cart change, so the figures a shopper
+         *     sees come from the same code that prices the order - there is no second
+         *     implementation of the tax rules in the client to drift out of step.
+         *
+         *     Tax follows the tenant's `price_includes_tax` preference: exclusive adds
+         *     tax on top of the catalog price, inclusive extracts the tax already
+         *     inside it. Order totals are summed from rounded line figures so the total
+         *     always equals the visible lines added up.
+         *
+         *     400 when the cart is empty, over 50 lines, has a quantity outside 1-999,
+         *     repeats a slug, or names something unpublished or unpriced. A bad line
+         *     fails the whole request rather than being dropped, so nobody is charged
+         *     for an order they did not submit.
+         *
+         *     Implemented in `routes/storefront.rs::quote`, arithmetic in
+         *     `storefront_pricing`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["StorefrontCart"];
+                };
+            };
+            responses: {
+                /** @description The priced cart. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["StorefrontQuote"];
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Place a web order
+         * @description Unauthenticated. Prices the cart exactly as `/quote` does, then writes an
+         *     ordinary `sales_orders` row with `source = 'web'`,
+         *     `fulfillment_status = 'draft'` and `approval_status = 1` - so it appears
+         *     in the approval queue staff already work from, and nothing reaches the
+         *     general ledger until a human accepts it.
+         *
+         *     `party_id` is left NULL. The shopper is recorded in
+         *     `storefront_customers`, keyed by phone so repeat guests converge on one
+         *     record; matching or creating a real `party` happens on approval, which
+         *     keeps abandoned and fraudulent orders out of the customer master.
+         *
+         *     Delivery details are stored on the order, not the customer, so a repeat
+         *     buyer can send a parcel somewhere new without a public endpoint
+         *     rewriting their saved address.
+         *
+         *     The response contains the only copy of `statusToken`; the database keeps
+         *     just its SHA-256. Implemented in `routes/storefront.rs::place_order`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["StorefrontCart"] & {
+                        contact: components["schemas"]["StorefrontContact"];
+                        /** @description Free text for the shop, stored as the order memo. */
+                        note?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description The order was accepted and is awaiting approval. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                orderNumber: string;
+                                /**
+                                 * @description 64 hex characters. The only copy - the server stores
+                                 *     a hash. Shown to the shopper for order tracking.
+                                 */
+                                statusToken: string;
+                                /** Format: int64 */
+                                totalMinor: number;
+                                currency?: components["schemas"]["StorefrontCurrency"];
+                            };
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tax": {
         parameters: {
             query?: never;
@@ -11226,6 +11376,90 @@ export interface components {
             isDone?: boolean;
             entityType?: string;
             entityId?: number;
+        };
+        /** @description The tenant's base currency. All storefront prices are in it. */
+        StorefrontCurrency: {
+            /** @description `currencies.shortcut`, e.g. NPR. */
+            code: string;
+            symbol: string;
+            /**
+             * @description From `tenant_preferences.decimal_places`. Divide minor-unit amounts
+             *     by 10^decimalPlaces to display; never do this in floating point.
+             */
+            decimalPlaces: number;
+        };
+        /**
+         * @description A cart as submitted. Slugs and quantities only - there is no field for a
+         *     price, by design.
+         */
+        StorefrontCart: {
+            lines: {
+                /** @description `item_storefront.url_slug`. Each may appear once. */
+                slug: string;
+                quantity: number;
+            }[];
+        };
+        /**
+         * @description Who is buying and where it goes. Stored on the order rather than the
+         *     customer record, so a repeat buyer can ship somewhere new.
+         */
+        StorefrontContact: {
+            name: string;
+            /**
+             * @description Checked only for 7-15 digits, not against a country format: an
+             *     over-strict rule rejects real customers, and the number is verified
+             *     in practice by someone calling it before delivery.
+             */
+            phone: string;
+            address: string;
+            /** @description Riders here navigate by landmark more than by address. */
+            landmark?: string | null;
+        };
+        /** @description One priced cart line. `netMinor + taxMinor = lineTotalMinor`. */
+        StorefrontQuoteLine: {
+            slug: string;
+            title: string;
+            quantity: number;
+            /**
+             * Format: int64
+             * @description The unit price as displayed in the catalog - tax-inclusive or not
+             *     according to the tenant's preference.
+             */
+            unitPriceMinor: number;
+            /**
+             * Format: int64
+             * @description Line total excluding tax.
+             */
+            netMinor: number;
+            /** Format: int64 */
+            taxMinor: number;
+            /**
+             * Format: int64
+             * @description What this line adds to the order total.
+             */
+            lineTotalMinor: number;
+        };
+        StorefrontQuote: {
+            tenant: components["schemas"]["StorefrontTenant"];
+            lines: components["schemas"]["StorefrontQuoteLine"][];
+            /**
+             * Format: int64
+             * @description Sum of line nets.
+             */
+            subtotalMinor: number;
+            /** Format: int64 */
+            taxMinor: number;
+            /**
+             * Format: int64
+             * @description What the shopper pays. Summed from rounded line figures, so it always
+             *     equals the visible lines added up.
+             */
+            totalMinor: number;
+            /**
+             * @description The tenant's `price_includes_tax` preference, echoed so the client can
+             *     label prices correctly without a second request.
+             */
+            taxInclusivePricing?: boolean;
         };
         /**
          * @description Shop-level context returned with every storefront response, so a client

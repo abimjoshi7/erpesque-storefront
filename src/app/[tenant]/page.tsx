@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
+import { CartLink } from "@/components/cart-link";
 import { fetchCatalog } from "@/lib/erp";
 import { formatPrice } from "@/lib/money";
 
@@ -41,7 +42,10 @@ export default async function CatalogPage({ params, searchParams }: PageProps) {
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
       <header className="mb-10 border-b border-neutral-200 pb-6 dark:border-neutral-800">
-        <h1 className="text-3xl font-semibold tracking-tight">{shop.name}</h1>
+        <div className="flex items-baseline justify-between gap-4">
+          <h1 className="text-3xl font-semibold tracking-tight">{shop.name}</h1>
+          <CartLink tenant={tenant} />
+        </div>
         <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
           {catalog.total} {catalog.total === 1 ? "product" : "products"}
           {category ? ` in ${category}` : ""}

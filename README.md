@@ -63,8 +63,23 @@ generate from somewhere else.
 | `npm run types:generate` | Regenerate API types from the OpenAPI spec |
 | `npm run types:check` | Fail if the generated types are stale |
 
+## The cart holds no prices
+
+`src/lib/cart.ts` stores slugs and quantities in localStorage and nothing else.
+Every figure a shopper sees comes from `POST /api/{tenant}/quote`, which the
+server answers by pricing the cart against the live catalog.
+
+That is a security property, not a performance one. A cart that remembered
+prices could be edited in devtools, and would quietly charge yesterday's price
+after an overnight repricing. Checkout re-prices again as it writes the order,
+so what is ordered is always what the shop currently sells at the price it
+currently charges — the total displayed is never an input to anything.
+
 ## Status
 
-Catalog listing, search, category filter, pagination, and product detail pages.
-Ordering is not built yet — cart, quote and checkout are the next slice, along
-with product images, stock badges and pricelist-resolved pricing.
+Catalog listing, search, category filter, pagination, product pages, cart, and
+checkout. Orders land in the ERP as draft sales orders awaiting staff approval;
+payment is on delivery.
+
+Not built yet: product images, stock badges, pricelist-resolved pricing,
+delivery charges, and the order-status page the checkout's status token is for.
