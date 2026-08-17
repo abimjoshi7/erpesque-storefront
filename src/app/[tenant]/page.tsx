@@ -17,9 +17,21 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const catalog = await fetchCatalog(tenant, { limit: 1 });
   if (!catalog) return { title: "Shop not found" };
 
+  const canonical = `/${encodeURIComponent(tenant)}`;
+
   return {
     title: `${catalog.tenant.name} — Shop`,
     description: `Browse ${catalog.total} products from ${catalog.tenant.name}.`,
+    // Points at the unfiltered listing on purpose. Every search, facet and page
+    // number is this same page with a query string, and letting each one be its
+    // own indexable URL splits the shop's ranking across near-identical copies.
+    alternates: { canonical },
+    openGraph: {
+      title: `${catalog.tenant.name} — Shop`,
+      description: `Browse ${catalog.total} products from ${catalog.tenant.name}.`,
+      url: canonical,
+      type: "website",
+    },
   };
 }
 

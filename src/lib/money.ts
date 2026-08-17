@@ -27,3 +27,20 @@ export function formatPrice(minor: number | null | undefined, currency: Currency
   // Intl would otherwise render its own idea of NPR.
   return `${currency.symbol ?? currency.code ?? ""} ${formatted}`.trim();
 }
+
+/**
+ * The same amount as a plain decimal string, for machines rather than people.
+ *
+ * schema.org's `price` wants "560.00", not "Rs 560" — a formatted price there
+ * is invalid structured data. Scale comes from the tenant's own
+ * `decimalPlaces`, because a currency with none (or three) is not a rounding
+ * error away from two.
+ */
+export function priceAsNumber(
+  minor: number | null | undefined,
+  currency: Currency,
+): string | null {
+  if (minor === null || minor === undefined) return null;
+  const decimals = currency.decimalPlaces ?? 2;
+  return (minor / 10 ** decimals).toFixed(decimals);
+}

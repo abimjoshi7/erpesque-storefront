@@ -5,9 +5,10 @@ import type { Metadata } from "next";
 import { AddToCart } from "@/components/add-to-cart";
 import { AvailabilityBadge } from "@/components/availability-badge";
 import { CartLink } from "@/components/cart-link";
-import { fetchProduct } from "@/lib/erp";
+import { fetchProduct, type Tenant } from "@/lib/erp";
 import { mediaHref } from "@/lib/media";
-import { formatPrice } from "@/lib/money";
+import { formatPrice, priceAsNumber } from "@/lib/money";
+import { absoluteUrl } from "@/lib/site";
 
 type PageProps = {
   params: Promise<{ tenant: string; slug: string }>;
@@ -23,10 +24,17 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     .map((path) => mediaHref(tenant, path))
     .filter((href): href is string => href !== null);
 
+  const canonical = `/${encodeURIComponent(tenant)}/product/${encodeURIComponent(slug)}`;
+
   return {
     title: `${product.title} — ${shop.name}`,
     description: product.description ?? undefined,
+    // A product reachable through a category or brand filter is the same page
+    // at several URLs; naming one of them stops the duplicates competing with
+    // each other in an index.
+    alternates: { canonical },
     openGraph: {
+      url: canonical,
       title: product.title,
       description: product.description ?? undefined,
       type: "website",
@@ -57,6 +65,13 @@ export default async function ProductPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-12">
+      <ProductJsonLd
+        tenant={tenant}
+        product={product}
+        shopName={shop.name}
+        currency={shop.currency}
+        images={images}
+      />
       <div className="flex items-baseline justify-between gap-4">
         <Link
           href={`/${tenant}`}
@@ -109,6 +124,83 @@ export default async function ProductPage({ params }: PageProps) {
         </div>
       </article>
     </main>
+  );
+}
+
+/**
+ * Structured data, so a search result can carry the price and whether the thing
+ * is in stock.
+ *
+ * Emitted from the same values the page renders rather than a second fetch:
+ * structured data that disagrees with the visible page is treated as
+ * misrepresentation, and the surest way to make them disagree is to derive them
+ * separately.
+ *
+ * `priceMinor` is divided here rather than formatted — schema.org wants a plain
+ * decimal number, not "Rs 560".
+ */
+function ProductJsonLd({
+  tenant,
+  product,
+  shopName,
+  currency,
+  images,
+}: {
+  tenant: string;
+  product: {
+    title: string;
+    slug?: string | null;
+    description?: string | null;
+    brand?: string | null;
+    priceMinor?: number | null;
+    availability?: string | null;
+  };
+  shopName: string;
+  currency: NonNullable<Tenant["currency"]> | undefined;
+  images: string[];
+}) {
+  const url = absoluteUrl(
+    `/${encodeURIComponent(tenant)}/product/${encodeURIComponent(product.slug ?? "")}`,
+  );
+
+  const availability =
+    product.availability === "out_of_stock"
+      ? "https://schema.org/OutOfStock"
+      : "https://schema.org/InStock";
+
+  const data: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.title,
+    url,
+    ...(product.description ? { description: product.description } : {}),
+    ...(product.brand ? { brand: { "@type": "Brand", name: product.brand } } : {}),
+    ...(images.length ? { image: images.map((src) => absoluteUrl(src)) } : {}),
+  };
+
+  // No price, no offer. An Offer without a price is invalid structured data,
+  // and inventing a zero would advertise the thing as free.
+  const price = currency ? priceAsNumber(product.priceMinor, currency) : null;
+  if (price !== null && currency?.code) {
+    data.offers = {
+      "@type": "Offer",
+      url,
+      price,
+      priceCurrency: currency.code,
+      availability,
+      seller: { "@type": "Organization", name: shopName },
+    };
+  }
+
+  return (
+    <script
+      type="application/ld+json"
+      // The payload is JSON.stringify output, never raw user text, and the
+      // `</script>` escape closes the one hole that leaves.
+      dangerouslySetInnerHTML={{
+        __html: JSON.stringify(data).replace(/</g, "\\u003c"),
+      }}
+    />
   );
 }
 
