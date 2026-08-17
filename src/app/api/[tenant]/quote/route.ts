@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { shopperIp } from "@/lib/client-ip";
 import { errorResponse, normalizeLines } from "@/lib/cart-request";
 import { fetchQuote, type CartLine } from "@/lib/erp";
 
@@ -31,7 +32,7 @@ export async function POST(
   }
 
   try {
-    const quote = await fetchQuote(tenant, lines);
+    const quote = await fetchQuote(tenant, lines, shopperIp(request));
     if (!quote) {
       return NextResponse.json({ error: "This shop is not available." }, { status: 404 });
     }

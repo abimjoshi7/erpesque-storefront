@@ -46,11 +46,33 @@ export type Facets = {
 export type Quote = {
   tenant: Tenant;
   lines: QuoteLine[];
+  /**
+   * Null when the shop does not charge for delivery. Deliberately not a line:
+   * the cart renders from `lines`, and a delivery entry there would look like
+   * something the shopper can change the quantity of or remove.
+   */
+  delivery: Delivery | null;
   subtotalMinor: number;
   taxMinor: number;
   totalMinor: number;
   taxInclusivePricing?: boolean;
 };
+
+export type Delivery = {
+  title: string;
+  /** What delivery adds to `totalMinor`. Zero when this basket earned it free. */
+  amountMinor: number;
+  /**
+   * The shop charges for delivery, but this basket cleared the threshold.
+   * Distinguishes "free" from "not offered", which `amountMinor: 0` cannot.
+   */
+  waived: boolean;
+  freeOverMinor?: number | null;
+};
+
+export type OrderStatus = components["schemas"]["StorefrontOrderStatus"];
+
+export type SitemapEntry = { slug: string; lastModified?: string | null };
 
 export type QuoteLine = components["schemas"]["StorefrontQuoteLine"];
 export type Contact = components["schemas"]["StorefrontContact"];
@@ -195,13 +217,20 @@ export async function fetchMedia(apiPath: string): Promise<Response> {
  * so they always read the live catalog even when the page the shopper came
  * from was served from the edge a minute ago.
  */
-async function post<T>(path: string, payload: unknown): Promise<T | null> {
+async function post<T>(
+  path: string,
+  payload: unknown,
+  shopperIp?: string,
+): Promise<T | null> {
   const response = await fetch(`${baseUrl()}${path}`, {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
       ...authHeaders(),
+      // Forwarded so the ERP can rate-limit and challenge the shopper rather
+      // than this server, which every shopper shares. See lib/client-ip.
+      ...(shopperIp ? { "X-Shopper-IP": shopperIp } : {}),
     },
     body: JSON.stringify(payload),
     cache: "no-store",
@@ -229,15 +258,96 @@ async function post<T>(path: string, payload: unknown): Promise<T | null> {
 export async function fetchQuote(
   tenantCode: string,
   lines: CartLine[],
+  shopperIp?: string,
 ): Promise<Quote | null> {
-  return post<Quote>(`/storefront/${encodeURIComponent(tenantCode)}/quote`, { lines });
+  return post<Quote>(
+    `/storefront/${encodeURIComponent(tenantCode)}/quote`,
+    { lines },
+    shopperIp,
+  );
 }
 
 export async function placeOrder(
   tenantCode: string,
-  payload: { lines: CartLine[]; contact: Contact; note?: string },
+  payload: {
+    lines: CartLine[];
+    contact: Contact;
+    note?: string;
+    /**
+     * From the checkout widget. Single-use: the ERP rejects a replay, so an
+     * order that fails for any other reason needs a freshly solved one.
+     */
+    turnstileToken?: string;
+  },
+  shopperIp?: string,
 ): Promise<PlacedOrder | null> {
-  return post<PlacedOrder>(`/storefront/${encodeURIComponent(tenantCode)}/order`, payload);
+  return post<PlacedOrder>(
+    `/storefront/${encodeURIComponent(tenantCode)}/order`,
+    payload,
+    shopperIp,
+  );
+}
+
+/**
+ * One shopper's order, by the token they were given at checkout.
+ *
+ * Never cached: it is personal, and it changes as the shop works through it.
+ */
+export async function fetchOrderStatus(
+  tenantCode: string,
+  token: string,
+): Promise<OrderStatus | null> {
+  const path = `/storefront/${encodeURIComponent(tenantCode)}/order/${encodeURIComponent(token)}`;
+  const response = await fetch(`${baseUrl()}${path}`, {
+    headers: { Accept: "application/json", ...authHeaders() },
+    cache: "no-store",
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ErpError(response.status, path);
+
+  const body = (await response.json()) as { data: OrderStatus };
+  return body.data;
+}
+
+/**
+ * Cancels an order the shop has not started. The ERP re-checks that
+ * server-side, so a stale page offering the button cannot force it through.
+ */
+export async function cancelOrder(
+  tenantCode: string,
+  token: string,
+  shopperIp?: string,
+): Promise<OrderStatus | null> {
+  return post<OrderStatus>(
+    `/storefront/${encodeURIComponent(tenantCode)}/order/${encodeURIComponent(token)}/cancel`,
+    {},
+    shopperIp,
+  );
+}
+
+/**
+ * Every published slug, for the sitemap.
+ *
+ * Cached for an hour: crawlers do not need the hour's news, and this is the
+ * one call that reads the whole catalog at once.
+ */
+export async function fetchSitemap(
+  tenantCode: string,
+): Promise<{ tenant: Tenant; products: SitemapEntry[]; truncated: boolean } | null> {
+  const path = `/storefront/${encodeURIComponent(tenantCode)}/sitemap`;
+  const response = await fetch(`${baseUrl()}${path}`, {
+    headers: { Accept: "application/json", ...authHeaders() },
+    next: { revalidate: 3600 },
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ErpError(response.status, path);
+
+  const body = (await response.json()) as {
+    data: { tenant: Tenant; products: SitemapEntry[]; truncated: boolean };
+  };
+  return body.data;
 }
 
 export async function fetchProduct(

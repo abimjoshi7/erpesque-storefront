@@ -9973,6 +9973,7 @@ export interface paths {
                     };
                 };
                 404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
             };
         };
         put?: never;
@@ -10034,6 +10035,7 @@ export interface paths {
                     };
                 };
                 404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
             };
         };
         put?: never;
@@ -10100,6 +10102,7 @@ export interface paths {
                  *     or not an image. The cases are deliberately indistinguishable.
                  */
                 404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
             };
         };
         put?: never;
@@ -10155,6 +10158,80 @@ export interface paths {
                     };
                 };
                 404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/sitemap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Published slugs for the shop's sitemap
+         * @description Unauthenticated. Feeds the storefront's `/{tenant}/sitemap.xml`.
+         *
+         *     Data rather than XML on purpose: building the XML here would mean the ERP
+         *     knowing the shop's domain, path prefix and locale segment, all of which
+         *     belong to the client that owns those URLs.
+         *
+         *     Unpaginated, unlike the catalog — a sitemap that stops at page one is
+         *     worse than none, because a crawler cannot tell it was cut short. It is
+         *     capped at the protocol's 50,000 URLs all the same and reports
+         *     `truncated`, so a catalog outgrowing a single file is visible rather than
+         *     silently short. Implemented in `routes/storefront.rs::sitemap`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Every published product, slug and last-modified only. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                tenant: components["schemas"]["StorefrontTenant"];
+                                products: {
+                                    slug: string;
+                                    /**
+                                     * Format: date-time
+                                     * @description The later of the shop copy's and the item's own
+                                     *     `modified_date` - a price or a name change
+                                     *     alters the page as much as the web title does.
+                                     */
+                                    lastModified?: string | null;
+                                }[];
+                                /**
+                                 * @description True when the catalog exceeds 50,000 published
+                                 *     products and the list was cut. A sitemap index is
+                                 *     needed at that point.
+                                 */
+                                truncated: boolean;
+                            };
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
             };
         };
         put?: never;
@@ -10228,6 +10305,7 @@ export interface paths {
                 };
                 400: components["responses"]["BadRequest"];
                 404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
             };
         };
         delete?: never;
@@ -10285,6 +10363,17 @@ export interface paths {
                         contact: components["schemas"]["StorefrontContact"];
                         /** @description Free text for the shop, stored as the order memo. */
                         note?: string | null;
+                        /**
+                         * @description Cloudflare Turnstile token from the checkout widget,
+                         *     verified server-side before the order is accepted.
+                         *
+                         *     Optional in the schema because a server without
+                         *     `TURNSTILE_SECRET_KEY` never looks at it. Where the key is
+                         *     configured, an order with no token, an invalid one, or a
+                         *     replayed one is refused with 403. The token is single-use:
+                         *     submit it once, and obtain a fresh one for a retry.
+                         */
+                        turnstileToken?: string | null;
                     };
                 };
             };
@@ -10311,9 +10400,520 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["BadRequest"];
+                /**
+                 * @description Turnstile could not confirm a person submitted the order. A
+                 *     Cloudflare outage does *not* produce this - a check that cannot be
+                 *     made lets the order through, leaving the rate buckets as the
+                 *     remaining guard.
+                 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/order/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Order status for the shopper
+         * @description Unauthenticated. The status token is the whole authentication story: 64
+         *     hex characters of CSPRNG output, handed out once at checkout and stored
+         *     only as a SHA-256, so holding the link is holding the order and nothing
+         *     else. There is no shopper session and no way to walk from one order to
+         *     another - orders are not addressable by id anywhere on this surface.
+         *
+         *     Every miss returns 404, so the endpoint cannot be used to learn whether
+         *     an order exists. Implemented in `routes/storefront.rs::order_status`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantCode: string;
+                    /** @description The `statusToken` returned by order submission. */
+                    token: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The order as its own shopper may see it. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["StorefrontOrderStatus"];
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/order/{token}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel an order the shop has not started
+         * @description Unauthenticated, authorised by the status token alone.
+         *
+         *     Allowed only while `fulfillment_status = 'draft'`, re-checked here rather
+         *     than trusted from the page that rendered the button - the shop may have
+         *     confirmed the order in the seconds since. `draft -> cancelled` is already
+         *     legal in `fulfillment.rs`, so no new state is introduced.
+         *
+         *     `approval_status` moves to rejected (4) alongside it. Without that the
+         *     order would sit in the approval queue forever, asking staff to decide on
+         *     something the customer has withdrawn.
+         *
+         *     Returns the same shape as the status endpoint, so the client can render
+         *     the result without a second call. Implemented in
+         *     `routes/storefront.rs::cancel_order`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantCode: string;
+                    token: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The order is cancelled. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["StorefrontOrderStatus"];
+                        };
+                    };
+                };
+                /**
+                 * @description The shop has already started work on the order, so it can no longer
+                 *     be cancelled online.
+                 */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront-admin/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the shop's configuration
+         * @description Authenticated, `storefront.read`. The merchant-facing mirror of the
+         *     public storefront: same tables, opposite side of the wall.
+         *
+         *     Each reference is resolved to a name through the same `is_active` /
+         *     `is_inactive` filters the public shop applies, so a preference pointing
+         *     at a deactivated pricelist reads back as unset - which is exactly how
+         *     the shop is behaving. Implemented in
+         *     `routes/storefront_admin.rs::get_settings`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The shop's configuration. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["StorefrontSettings"];
+                        };
+                    };
+                };
+            };
+        };
+        /**
+         * Configure the shop's pricing, location and stock threshold
+         * @description Authenticated, `storefront.write`.
+         *
+         *     Deliberately cannot switch the shop on or off. `enabled_modules` is what
+         *     makes a tenant reachable from the public internet, and that toggle stays
+         *     on the preferences page rather than being something this endpoint can
+         *     flip as a side effect of saving a threshold.
+         *
+         *     A null `pricelistId` or `locationId` clears the preference, which is a
+         *     real choice: no pricelist puts the shop back on item-master pricing, and
+         *     no location stops it reporting availability at all. Ids that do not
+         *     exist, belong to another tenant, or are deactivated are rejected with
+         *     400 rather than left to the foreign key, so the merchant is told which
+         *     choice was wrong. Implemented in
+         *     `routes/storefront_admin.rs::update_settings`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        pricelistId?: number | null;
+                        locationId?: number | null;
+                        /**
+                         * Format: double
+                         * @default 5
+                         */
+                        lowStockThreshold?: number;
+                        /**
+                         * @description Null stops the shop charging for delivery. Must be a
+                         *     non-stock item of this tenant's, and is required whenever
+                         *     `deliveryFee` is above zero - a fee with nothing to bill it
+                         *     as would silently append no line, leaving the merchant no way
+                         *     to tell why.
+                         */
+                        deliveryItemId?: number | null;
+                        /**
+                         * Format: double
+                         * @default 0
+                         */
+                        deliveryFee?: number;
+                        /**
+                         * Format: double
+                         * @description Null means delivery is never free.
+                         */
+                        freeDeliveryOver?: number | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description The saved configuration. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["StorefrontSettings"];
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront-admin/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the pricelists, locations and delivery items the shop may use
+         * @description Authenticated, `storefront.read`. Feeds the two dropdowns on the
+         *     settings page.
+         *
+         *     Its own endpoint rather than a reuse of `/pricelists` and
+         *     `/inventory-location`, for two reasons. Those return the full master
+         *     records - rules, capacities, coordinates - where a dropdown needs an id
+         *     and a name. More importantly they answer a different question: this
+         *     returns exactly the rows `PUT /storefront-admin/settings` will accept,
+         *     filtered by the same `is_active` / `is_inactive` predicates, so the page
+         *     cannot offer a choice that is then rejected on save. Implemented in
+         *     `routes/storefront_admin.rs::get_options`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The choices. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                pricelists?: components["schemas"]["StorefrontOption"][];
+                                locations?: components["schemas"]["StorefrontOption"][];
+                                /**
+                                 * @description Non-stock items only, matching what
+                                 *     `PUT /storefront-admin/settings` accepts as the
+                                 *     delivery charge.
+                                 */
+                                deliveryItems?: components["schemas"]["StorefrontOption"][];
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront-admin/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List sellable items with their publication state
+         * @description Authenticated, `storefront.read`.
+         *
+         *     Driven from `items` with a LEFT JOIN onto `item_storefront`, which is
+         *     the opposite of every query in the public module. The shop-side question
+         *     is "which of my products are published", and an item that has never been
+         *     published has no `item_storefront` row at all - joining the other way
+         *     would hide exactly the items a merchant opened this screen to find.
+         *
+         *     Omitting `published` returns both states, which is the useful default:
+         *     "what have I not put in the shop yet". Implemented in
+         *     `routes/storefront_admin.rs::list_items`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Free-text over item name and code. */
+                    q?: string;
+                    /** @description Filter to one publication state; omit for both. */
+                    published?: boolean;
+                    page?: number;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description A page of items. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                items?: components["schemas"]["StorefrontAdminItem"][];
+                                page?: number;
+                                pageSize?: number;
+                                total?: number;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront-admin/item": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one item's storefront record
+         * @description Authenticated, `storefront.read`.
+         *
+         *     An item with no storefront row returns the unpublished defaults rather
+         *     than a 404, so the item form renders the storefront tab identically for
+         *     a product that has never been near the shop and one that has. In that
+         *     case `urlSlug` is the slug the server *would* generate, so the merchant
+         *     can see their product's future URL before committing to it.
+         *
+         *     404 only when the item id is not this tenant's. Implemented in
+         *     `routes/storefront_admin.rs::get_item`.
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description `items.item_id` - the SERIAL business key, not the UUID. */
+                    itemId: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The record, plus names for the files in its gallery. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                storefront?: components["schemas"]["StorefrontItemRecord"];
+                                /**
+                                 * @description Names for the ids in `storefront.gallery`, in the
+                                 *     merchant's order, so an editor can label the
+                                 *     photographs without a round trip per file.
+                                 */
+                                galleryFiles?: components["schemas"]["StorefrontGalleryFile"][];
+                            };
+                        };
+                    };
+                };
                 404: components["responses"]["NotFound"];
             };
         };
+        /**
+         * Publish, unpublish or edit one item's shop page
+         * @description Authenticated, `storefront.write` - not `item.write`. Editing a product
+         *     is internal; putting it on the public internet is not, and the two are
+         *     routinely different people's jobs.
+         *
+         *     **Slugs are a promise.** Omitting `urlSlug` leaves an existing slug
+         *     alone and generates one for a new record, from `webTitle` or the item
+         *     name. Sending a *different* slug is a deliberate rename that breaks
+         *     every link already pointing at the page. Collisions within the tenant
+         *     get a `-2`, `-3` suffix, because two products legitimately share a name.
+         *     A title with no ASCII in it (Devanagari, say) yields `item-{itemId}`
+         *     rather than a guessed transliteration that would be baked into a
+         *     permanent URL.
+         *
+         *     `gallery` is validated on the way in: every id must be this tenant's and
+         *     must be an image, and duplicates are rejected. The public media route
+         *     would refuse these anyway, but silently - failing the save puts the
+         *     explanation where the mistake was made.
+         *
+         *     `publishedAt` is stamped on the first transition into publication and
+         *     never moved, so "new arrivals" survives an edit or a brief unpublish.
+         *     Implemented in `routes/storefront_admin.rs::save_item`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        itemId: number;
+                        isPublished: boolean;
+                        /** @description Omit to keep an existing slug or generate a new one. */
+                        urlSlug?: string | null;
+                        /** @description Shop title; falls back to the ERP item name when blank. */
+                        webTitle?: string | null;
+                        longDescription?: string | null;
+                        /**
+                         * @description Higher sorts first in listings.
+                         * @default 0
+                         */
+                        sortWeight?: number;
+                        /** @description `file_attachments.id`, in display order; the first is the card image. */
+                        gallery?: number[];
+                    };
+                };
+            };
+            responses: {
+                /** @description The saved record, in the same shape as GET. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                storefront?: components["schemas"]["StorefrontItemRecord"];
+                                galleryFiles?: components["schemas"]["StorefrontGalleryFile"][];
+                            };
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -11551,6 +12151,110 @@ export interface components {
             /** @description Riders here navigate by landmark more than by address. */
             landmark?: string | null;
         };
+        /**
+         * @description How a merchant's shop is configured. Names accompany ids because a
+         *     settings page has to read as "Hanuman Chowk", not `51`.
+         */
+        StorefrontSettings: {
+            /**
+             * @description Whether `storefront` is in `enabled_modules`. Read-only here - the
+             *     toggle lives on the preferences page. A shop that is configured but
+             *     switched off 404s publicly, which is otherwise indistinguishable
+             *     from a broken one.
+             */
+            enabled: boolean;
+            pricelistId?: number | null;
+            /** @description Null when the referenced pricelist was deactivated. */
+            pricelistName?: string | null;
+            locationId?: number | null;
+            /** @description Null when the referenced location was deactivated. */
+            locationName?: string | null;
+            /**
+             * Format: double
+             * @description At or below this quantity the public badge reads `low_stock`. Never
+             *     shown to a shopper - the public API reports a coarse enum.
+             */
+            lowStockThreshold: number;
+            /**
+             * @description The non-stock item the delivery charge is billed as. Null means the
+             *     shop does not charge for delivery and no line is appended to an
+             *     order. A stock item is refused on save: the order would otherwise
+             *     try to take a delivery out of inventory.
+             */
+            deliveryItemId?: number | null;
+            /** @description Null when the referenced item was deactivated or deleted. */
+            deliveryItemName?: string | null;
+            /**
+             * Format: double
+             * @description Flat fee in the tenant's major units. Zero is the same as charging
+             *     nothing - no line is appended either way. Tax comes from the item's
+             *     own tax, like any other line.
+             */
+            deliveryFee?: number;
+            /**
+             * Format: double
+             * @description Goods total at or above which delivery is free. Null never waives it.
+             *     Compared against the basket *excluding* delivery, since the fee
+             *     cannot count towards the threshold that decides whether it applies.
+             */
+            freeDeliveryOver?: number | null;
+        };
+        /** @description An id and a name for a settings dropdown. */
+        StorefrontOption: {
+            id: number;
+            name?: string | null;
+        };
+        /** @description A sellable item as the publishing screen sees it. */
+        StorefrontAdminItem: {
+            itemId: number;
+            name?: string | null;
+            code?: string | null;
+            category?: string | null;
+            /**
+             * Format: double
+             * @description `items.initial_sales_rate` in major units - the ERP's own storage,
+             *     not the public API's minor-unit contract. This is an internal screen.
+             */
+            salesRate?: number | null;
+            isPublished: boolean;
+            /** @description Null until the item has been saved to the shop once. */
+            urlSlug?: string | null;
+            webTitle?: string | null;
+            sortWeight?: number;
+            /** @description Photographs in the gallery, so the list can flag products with none. */
+            imageCount?: number;
+            /** Format: date-time */
+            publishedAt?: string | null;
+        };
+        /** @description One item's shop page as the merchant edits it. */
+        StorefrontItemRecord: {
+            itemId: number;
+            isPublished: boolean;
+            /**
+             * @description The public URL segment. For an item with no record yet this is the
+             *     slug the server *would* generate, not a stored value.
+             */
+            urlSlug: string;
+            /** @description Null falls back to the ERP item name on the public page. */
+            webTitle?: string | null;
+            /** @description Null falls back to the ERP item description. */
+            longDescription?: string | null;
+            sortWeight: number;
+            /** @description `file_attachments.id` in display order; the first is the card image. */
+            gallery: number[];
+            /**
+             * Format: date-time
+             * @description First transition into publication, never moved afterwards, so "new
+             *     arrivals" means what a shopper expects.
+             */
+            publishedAt?: string | null;
+        };
+        /** @description A photograph in a product gallery, labelled for the editor. */
+        StorefrontGalleryFile: {
+            fileId: number;
+            fileName?: string | null;
+            contentType?: string | null;
+        };
         /** @description One navigable value in the shop, with how many products carry it. */
         StorefrontFacet: {
             /**
@@ -11625,10 +12329,91 @@ export interface components {
              */
             totalMinor: number;
             /**
+             * @description Null when the shop does not charge for delivery. Kept out of `lines`
+             *     on purpose: the cart is rendered from `lines`, and a delivery entry
+             *     there would look like something the shopper can change the quantity
+             *     of or remove.
+             */
+            delivery?: {
+                /** @description The delivery item's name, as it will appear on the order. */
+                title: string;
+                /**
+                 * Format: int64
+                 * @description What delivery adds to `totalMinor`, tax included. Zero when this
+                 *     basket earned free delivery.
+                 */
+                amountMinor: number;
+                /**
+                 * @description True when the shop charges for delivery but this basket cleared
+                 *     the free-delivery threshold. Distinguishes "free" from "not
+                 *     offered", which `amountMinor: 0` alone cannot.
+                 */
+                waived: boolean;
+                /**
+                 * Format: int64
+                 * @description The threshold, so the client can say how far short a basket is.
+                 */
+                freeOverMinor?: number | null;
+            } | null;
+            /**
              * @description The tenant's `price_includes_tax` preference, echoed so the client can
              *     label prices correctly without a second request.
              */
             taxInclusivePricing?: boolean;
+        };
+        /**
+         * @description One order as its own shopper may see it. Deliberately not every column on
+         *     `sales_orders` - this is a public read, and the storefront module's rule
+         *     is that anything a shopper may not see should be impossible to return
+         *     rather than filtered afterwards.
+         */
+        StorefrontOrderStatus: {
+            orderNumber?: string | null;
+            /** Format: date-time */
+            orderDate?: string | null;
+            /**
+             * @description The order's state in the shopper's terms. A staff rejection reports
+             *     as `cancelled` rather than as itself: the two are the same event from
+             *     outside - the order is not coming - and "rejected" invites a shopper
+             *     to read a judgement into what is usually a stock problem.
+             * @enum {string}
+             */
+            status: "pending" | "confirmed" | "partially_sent" | "delivered" | "cancelled";
+            /**
+             * @description True only while the order is still `draft` and not rejected. The
+             *     cancel endpoint re-checks server-side regardless.
+             */
+            cancellable: boolean;
+            contactName?: string | null;
+            deliveryAddress?: string | null;
+            deliveryLandmark?: string | null;
+            /** @description The order memo - what the shopper typed at checkout. */
+            note?: string | null;
+            /**
+             * @description Includes the delivery line when one was charged, because that is what
+             *     the order actually consists of.
+             */
+            lines: {
+                title?: string | null;
+                /** Format: double */
+                quantity?: number;
+                /** Format: int64 */
+                unitPriceMinor?: number;
+                /** Format: int64 */
+                discountMinor?: number;
+                /** Format: int64 */
+                netMinor?: number;
+                /** Format: int64 */
+                taxMinor?: number;
+                /** Format: int64 */
+                lineTotalMinor?: number;
+            }[];
+            /**
+             * Format: int64
+             * @description Summed from the order lines, delivery included.
+             */
+            totalMinor: number;
+            currency: components["schemas"]["StorefrontCurrency"];
         };
         /**
          * @description Shop-level context returned with every storefront response, so a client
@@ -12278,6 +13063,20 @@ export interface components {
         };
         /** @description Caller's role does not have permission for this operation */
         Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /**
+         * @description Rate limit exceeded. Returned by the edge Worker, not the origin, so the
+         *     body is `{"error": "rate_limit_exceeded"}` rather than the usual error
+         *     shape. Storefront traffic has its own buckets - generous for reads,
+         *     strict for order submission and additionally capped per shop.
+         */
+        TooManyRequests: {
             headers: {
                 [name: string]: unknown;
             };

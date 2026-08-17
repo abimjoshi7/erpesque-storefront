@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { Turnstile } from "@/components/turnstile";
+
 import { AvailabilityBadge } from "@/components/availability-badge";
 import { useCart } from "@/lib/cart";
 import type { CartLine, PlacedOrder, Quote } from "@/lib/erp";
@@ -180,13 +182,27 @@ export function CartView({ tenant, shopName }: Props) {
               <dd className="tabular-nums">{formatPrice(quote.taxMinor, currency)}</dd>
             </div>
           ) : null}
+          {quote.delivery ? (
+            <div className="flex justify-between">
+              <dt className="text-neutral-600 dark:text-neutral-400">
+                {quote.delivery.title}
+              </dt>
+              <dd className="tabular-nums">
+                {quote.delivery.waived
+                  ? "Free"
+                  : formatPrice(quote.delivery.amountMinor, currency)}
+              </dd>
+            </div>
+          ) : null}
           <div className="flex justify-between border-t border-neutral-200 pt-2 text-base font-medium dark:border-neutral-800">
             <dt>Total</dt>
             <dd className="tabular-nums">{formatPrice(quote.totalMinor, currency)}</dd>
           </div>
           <p className="pt-1 text-xs text-neutral-500">
-            Payment is on delivery. Delivery charges, if any, are confirmed when the shop
-            calls you.
+            Payment is on delivery.
+            {quote.delivery && !quote.delivery.waived && quote.delivery.freeOverMinor
+              ? ` Delivery is free over ${formatPrice(quote.delivery.freeOverMinor, currency)}.`
+              : ""}
           </p>
         </dl>
       ) : null}
@@ -217,6 +233,11 @@ function Checkout({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // Bumped after every failed submit. The token Cloudflare issued has been
+  // spent by then, and re-sending it would fail as a replay — which would look
+  // to the shopper like their corrected address was rejected too.
+  const [turnstileNonce, setTurnstileNonce] = useState(0);
 
   return (
     <form
@@ -239,16 +260,19 @@ function Checkout({
                 landmark: form.get("landmark"),
               },
               note: form.get("note"),
+              turnstileToken,
             }),
           });
           const body = (await response.json()) as { data?: PlacedOrder; error?: string };
           if (!response.ok || !body.data) {
             setError(body.error ?? "Could not place your order.");
+            setTurnstileNonce((nonce) => nonce + 1);
             return;
           }
           onPlaced(body.data);
         } catch {
           setError("Could not reach the shop. Check your connection.");
+          setTurnstileNonce((nonce) => nonce + 1);
         } finally {
           setSubmitting(false);
         }
@@ -261,6 +285,8 @@ function Checkout({
       <Field name="address" label="Delivery address" required autoComplete="street-address" />
       <Field name="landmark" label="Landmark (optional)" />
       <Field name="note" label="Anything the shop should know (optional)" />
+
+      <Turnstile onToken={setTurnstileToken} resetSignal={turnstileNonce} />
 
       {error ? (
         <p className="rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
@@ -318,6 +344,28 @@ function OrderPlaced({ tenant, order }: { tenant: string; order: PlacedOrder }) 
           Total: {formatPrice(order.totalMinor, order.currency)}
         </p>
       ) : null}
+
+      {/*
+        The status link is shown once, here, and never emailed or stored: this
+        is the only copy the shopper will get, because the shop keeps a hash of
+        the token rather than the token. Worth saying so plainly — otherwise
+        someone closes the tab and has no way back to their own order.
+      */}
+      <div className="rounded-md border border-neutral-200 p-4 text-sm dark:border-neutral-800">
+        <p>
+          <Link
+            href={`/${tenant}/order/${order.statusToken}`}
+            className="font-medium underline underline-offset-4"
+          >
+            Track or cancel this order
+          </Link>
+        </p>
+        <p className="mt-1 text-neutral-600 dark:text-neutral-400">
+          Save this link — it is the only way back to your order, and it is not sent
+          anywhere else.
+        </p>
+      </div>
+
       <Link href={`/${tenant}`} className="underline underline-offset-4">
         Keep shopping
       </Link>

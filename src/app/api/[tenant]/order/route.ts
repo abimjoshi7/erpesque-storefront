@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { shopperIp } from "@/lib/client-ip";
 import { errorResponse, normalizeLines } from "@/lib/cart-request";
 import { placeOrder, type CartLine, type Contact } from "@/lib/erp";
 
@@ -21,12 +22,14 @@ export async function POST(
   let lines: CartLine[];
   let contact: Contact;
   let note: string | undefined;
+  let turnstileToken: string | undefined;
 
   try {
     const body = (await request.json()) as {
       lines?: unknown;
       contact?: Partial<Contact>;
       note?: unknown;
+      turnstileToken?: unknown;
     };
     lines = normalizeLines(body.lines);
     contact = {
@@ -36,6 +39,12 @@ export async function POST(
       landmark: body.contact?.landmark ? String(body.contact.landmark).trim() : undefined,
     };
     note = typeof body.note === "string" && body.note.trim() ? body.note.trim() : undefined;
+    // Passed through unread. Only the ERP can judge it, and a check here would
+    // be a second opinion with no authority — the secret key lives there.
+    turnstileToken =
+      typeof body.turnstileToken === "string" && body.turnstileToken
+        ? body.turnstileToken
+        : undefined;
   } catch {
     return NextResponse.json({ error: "Malformed request." }, { status: 400 });
   }
@@ -51,7 +60,11 @@ export async function POST(
   }
 
   try {
-    const order = await placeOrder(tenant, { lines, contact, note });
+    const order = await placeOrder(
+      tenant,
+      { lines, contact, note, turnstileToken },
+      shopperIp(request),
+    );
     if (!order) {
       return NextResponse.json({ error: "This shop is not available." }, { status: 404 });
     }
