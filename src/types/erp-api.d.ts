@@ -9983,6 +9983,133 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/{tenantCode}/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the categories and brands present in a tenant's public shop
+         * @description Unauthenticated, same tenant rules as the catalog endpoint. Powers the
+         *     shop's navigation, and the values are exactly what `?category=` and
+         *     `?brand=` on `/catalog` accept.
+         *
+         *     Separate from `/catalog` because the two have different lifetimes: a
+         *     listing changes as a shopper filters and pages, while this changes only
+         *     when the merchant publishes something new, and so can be cached hard at
+         *     the edge.
+         *
+         *     `productCount` is over the whole published catalog, not the currently
+         *     applied filter - these are not co-dependent facet counts. Blank and
+         *     whitespace-only values are omitted rather than returned as an empty
+         *     facet. Implemented in `routes/storefront.rs::facets`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description `tenants.tenant_code` - the shop's URL segment. */
+                    tenantCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The shop's facets. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                tenant?: components["schemas"]["StorefrontTenant"];
+                                categories?: components["schemas"]["StorefrontFacet"][];
+                                brands?: components["schemas"]["StorefrontFacet"][];
+                            };
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/media/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream a published product photograph
+         * @description Unauthenticated, same tenant rules as the catalog endpoint. Returns the
+         *     raw image bytes, not JSON, and is the only way out of the file store for
+         *     the public.
+         *
+         *     A file is served only when it is in the `gallery` of a currently
+         *     published, active, non-deleted item belonging to this tenant.
+         *     Unpublishing a product therefore takes its photographs offline with it,
+         *     and no other file in the tenant's storage is reachable however its id is
+         *     guessed. Non-images are refused even when correctly linked, so a supplier
+         *     PDF dragged into a gallery by mistake does not become a public download.
+         *
+         *     `Cache-Control: public, max-age=31536000, immutable`. The URL carries a
+         *     `file_attachments.id` and replacing a photo means a new file and a new
+         *     id, so nothing behind one of these URLs can change. This is why the
+         *     proxy exists at all: R2's own presigned GETs expire, and so can never be
+         *     cached at the edge or put in a share card.
+         *
+         *     Implemented in `routes/storefront.rs::media`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description `tenants.tenant_code` - the shop's URL segment. */
+                    tenantCode: string;
+                    /** @description `file_attachments.id`, as it appears in `StorefrontProduct.images`. */
+                    fileId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The image bytes. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "image/*": string;
+                    };
+                };
+                /**
+                 * @description No such file, not this tenant's, not in a published product's gallery,
+                 *     or not an image. The cases are deliberately indistinguishable.
+                 */
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/{tenantCode}/product/{slug}": {
         parameters: {
             query?: never;
@@ -10127,9 +10254,14 @@ export interface paths {
          *     general ledger until a human accepts it.
          *
          *     `party_id` is left NULL. The shopper is recorded in
-         *     `storefront_customers`, keyed by phone so repeat guests converge on one
-         *     record; matching or creating a real `party` happens on approval, which
-         *     keeps abandoned and fraudulent orders out of the customer master.
+         *     `storefront_customers`, keyed by the canonical phone so repeat guests
+         *     converge on one record however they typed their number.
+         *
+         *     Approving the order (`approval_status` 2 or above, or moving
+         *     fulfillment to `confirmed`) matches the shopper against existing
+         *     customers by phone and creates a `party` if none matches, then links it
+         *     to the order. Doing it at approval rather than checkout is what keeps
+         *     abandoned and fraudulent orders out of the customer master.
          *
          *     Delivery details are stored on the order, not the customer, so a repeat
          *     buyer can send a parcel somewhere new without a public endpoint
@@ -11409,11 +11541,26 @@ export interface components {
              * @description Checked only for 7-15 digits, not against a country format: an
              *     over-strict rule rejects real customers, and the number is verified
              *     in practice by someone calling it before delivery.
+             *
+             *     Stored as typed, but identity is the trailing ten digits, so
+             *     "+977 9841112233" and "98-4111-2233" are the same shopper and
+             *     eventually the same customer.
              */
             phone: string;
             address: string;
             /** @description Riders here navigate by landmark more than by address. */
             landmark?: string | null;
+        };
+        /** @description One navigable value in the shop, with how many products carry it. */
+        StorefrontFacet: {
+            /**
+             * @description The trimmed `items.category_name` or `items.brand_name`. Pass it back
+             *     verbatim as `?category=` or `?brand=` on `/catalog`; matching there is
+             *     case-insensitive.
+             */
+            value: string;
+            /** @description Published products carrying this value. */
+            productCount: number;
         };
         /** @description One priced cart line. `netMinor + taxMinor = lineTotalMinor`. */
         StorefrontQuoteLine: {
@@ -11424,11 +11571,27 @@ export interface components {
              * Format: int64
              * @description The unit price as displayed in the catalog - tax-inclusive or not
              *     according to the tenant's preference.
+             *
+             *     With multi-buy pricing the line is not this times the quantity; see
+             *     `discountMinor`.
              */
             unitPriceMinor: number;
             /**
              * Format: int64
-             * @description Line total excluding tax.
+             * @description `unitPriceMinor` x `quantity` minus what the line actually costs: the
+             *     saving produced by multi-buy rules on the tenant's storefront
+             *     pricelist, and 0 without them.
+             *
+             *     Resolved as an unbounded knapsack over the repeatable bundles, so a
+             *     quantity that two smaller bundles cover more cheaply than one larger
+             *     one is priced the cheaper way. Mirrors `PricelistPriceResolver` in
+             *     the Flutter app, so a shopper and a cashier are quoted the same
+             *     basket at the same figure.
+             */
+            discountMinor?: number;
+            /**
+             * Format: int64
+             * @description Line total excluding tax, after `discountMinor`.
              */
             netMinor: number;
             /** Format: int64 */
@@ -11438,6 +11601,12 @@ export interface components {
              * @description What this line adds to the order total.
              */
             lineTotalMinor: number;
+            /**
+             * @description Rechecked live at quote time, so a cart left open overnight corrects
+             *     itself. See `StorefrontProduct.availability`.
+             * @enum {string|null}
+             */
+            availability?: "in_stock" | "low_stock" | "out_of_stock" | null;
         };
         StorefrontQuote: {
             tenant: components["schemas"]["StorefrontTenant"];
@@ -11509,10 +11678,51 @@ export interface components {
              *     `numeric`, so rounding is deterministic) rather than handing a float
              *     to a client that will add up a cart.
              *
-             *     Sourced from `items.initial_sales_rate` today; resolving the tenant's
-             *     designated storefront pricelist is a later slice.
+             *     Sourced from the single-unit rule on the tenant's
+             *     `tenant_preferences.storefront_pricelist_id`, honouring each rule's
+             *     `is_active` flag and date range, and falling back to
+             *     `items.initial_sales_rate` when the pricelist does not price the item
+             *     (or the tenant has named none).
+             *
+             *     Multi-buy rules on the same pricelist are not reflected here - a
+             *     per-unit price cannot express "3 for the price of 2". They are
+             *     applied at `/quote` and `/order`, so a cart total may come in under
+             *     `priceMinor` x quantity.
              */
             priceMinor?: number | null;
+            /**
+             * @description A coarse badge, never a quantity: the public catalog must not be
+             *     usable to reconstruct inventory levels. Read from
+             *     `item_location_balances` at the tenant's
+             *     `tenant_preferences.storefront_location_id` - one location, not a sum
+             *     across warehouses, because the shop can only ship what is where it
+             *     ships from.
+             *
+             *     `low_stock` at or below
+             *     `tenant_preferences.storefront_low_stock_threshold`.
+             *
+             *     Null means the shop cannot answer, and clients render no badge at
+             *     all: either the tenant has named no storefront location, or the item
+             *     is not stock-tracked (a service). That is different from zero, and
+             *     showing "out of stock" for it would lose a sale the shop could make.
+             *
+             *     Advisory, not a reservation: stock is not held between quote and
+             *     approval. `/quote` and `/order` recheck it, and reject an
+             *     `out_of_stock` line unless the tenant runs with
+             *     `negative_stock_allowed`.
+             * @enum {string|null}
+             */
+            availability?: "in_stock" | "low_stock" | "out_of_stock" | null;
+            /**
+             * @description Product photographs in the order the merchant arranged them - the
+             *     first is the card image. Empty when none have been uploaded.
+             *
+             *     API-relative paths (`/storefront/{tenantCode}/media/{fileId}`), not
+             *     absolute URLs: the caller knows which host the browser should be sent
+             *     to and the ERP does not. The Next storefront serves them through its
+             *     own origin, so a shopper's browser never has to reach the ERP.
+             */
+            images?: string[];
         };
         Tax: {
             id: number;

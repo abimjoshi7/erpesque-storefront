@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { AvailabilityBadge } from "@/components/availability-badge";
 import { useCart } from "@/lib/cart";
 import type { CartLine, PlacedOrder, Quote } from "@/lib/erp";
 import { formatPrice } from "@/lib/money";
@@ -111,6 +112,19 @@ export function CartView({ tenant, shopName }: Props) {
                 {priced && currency ? (
                   <p className="text-sm text-neutral-600 tabular-nums dark:text-neutral-400">
                     {formatPrice(priced.unitPriceMinor, currency)} each
+                  </p>
+                ) : null}
+                {/* Multi-buy savings are shown, not silently applied. A total
+                    lower than price × quantity looks like a mistake unless the
+                    shopper is told why it is lower. */}
+                {priced?.discountMinor && currency ? (
+                  <p className="text-sm text-emerald-700 tabular-nums dark:text-emerald-400">
+                    Multi-buy saving {formatPrice(priced.discountMinor, currency)}
+                  </p>
+                ) : null}
+                {priced?.availability ? (
+                  <p className="mt-0.5">
+                    <AvailabilityBadge availability={priced.availability} />
                   </p>
                 ) : null}
               </div>

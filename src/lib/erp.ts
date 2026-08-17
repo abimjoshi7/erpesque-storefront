@@ -35,6 +35,14 @@ export type CatalogQuery = {
   limit?: number;
 };
 
+export type Facet = components["schemas"]["StorefrontFacet"];
+
+export type Facets = {
+  tenant: Tenant;
+  categories: Facet[];
+  brands: Facet[];
+};
+
 export type Quote = {
   tenant: Tenant;
   lines: QuoteLine[];
@@ -138,6 +146,48 @@ export async function fetchCatalog(
   if (query.limit) search.set("limit", String(query.limit));
 
   return get<Catalog>(`/storefront/${encodeURIComponent(tenantCode)}/catalog`, search);
+}
+
+/**
+ * The shop's category and brand navigation.
+ *
+ * Cached for an hour rather than the minute `get` uses: this changes only when
+ * the merchant publishes something new, and re-fetching it on every listing
+ * render would make the cheap query as expensive as the one it sits beside.
+ */
+export async function fetchFacets(tenantCode: string): Promise<Facets | null> {
+  const path = `/storefront/${encodeURIComponent(tenantCode)}/facets`;
+  const response = await fetch(`${baseUrl()}${path}`, {
+    headers: { Accept: "application/json", ...authHeaders() },
+    next: { revalidate: 3600 },
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ErpError(response.status, path);
+
+  const body = (await response.json()) as { data: Facets };
+  return body.data;
+}
+
+/**
+ * Fetches a product photograph's raw bytes.
+ *
+ * Returns the `Response` rather than a parsed body: the media route handler
+ * streams it straight back to the browser, so decoding it here would only mean
+ * buffering an image in memory to hand it over unchanged.
+ *
+ * `apiPath` comes from `Product.images` and is used verbatim. It is the ERP's
+ * own output, not user input, and the ERP re-checks tenant and publication on
+ * every request regardless.
+ */
+export async function fetchMedia(apiPath: string): Promise<Response> {
+  return fetch(`${baseUrl()}${apiPath}`, {
+    headers: authHeaders(),
+    // The ERP marks these immutable for a year and the browser will honour
+    // that; caching the bytes in the Next data cache as well would spend the
+    // cache budget on something already cached one hop further out.
+    cache: "no-store",
+  });
 }
 
 /**

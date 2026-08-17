@@ -15,10 +15,17 @@ export function AddToCart({
   tenant,
   slug,
   disabled,
+  outOfStock,
 }: {
   tenant: string;
   slug: string;
   disabled?: boolean;
+  /**
+   * Kept apart from `disabled` because the two are different sentences: one
+   * says the shop has not finished setting the product up, the other says it
+   * has sold out. A shopper can act on the second by coming back.
+   */
+  outOfStock?: boolean;
 }) {
   const { add } = useCart(tenant);
   const [added, setAdded] = useState(false);
@@ -27,6 +34,17 @@ export function AddToCart({
     return (
       <p className="mt-8 rounded-md border border-dashed border-neutral-300 p-4 text-sm text-neutral-500 dark:border-neutral-700">
         This item has no price yet, so it cannot be ordered online. Contact the shop.
+      </p>
+    );
+  }
+
+  // Only a convenience. The ERP refuses an out-of-stock line at quote and at
+  // order, so hiding this button is what spares the shopper the round trip, not
+  // what enforces the rule.
+  if (outOfStock) {
+    return (
+      <p className="mt-8 rounded-md border border-dashed border-neutral-300 p-4 text-sm text-neutral-500 dark:border-neutral-700">
+        Out of stock. Check back soon, or contact the shop to ask when it returns.
       </p>
     );
   }
