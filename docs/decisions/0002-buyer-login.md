@@ -234,13 +234,24 @@ outcome available here.
 
 The second concerns rendering. `cookies()` must not be called in
 `src/app/[tenant]/layout.tsx`. It is a request-time API, and using it in a layout
-opts every page beneath `/{tenant}` into dynamic rendering, discarding the
-one-hour revalidate on facets and the edge caching the catalog depends on. The
-README's known gaps already identify page weight as the live problem on a phone;
-making the entire shop dynamic in order to render a "Sign in" link would trade
-that away for something cosmetic. The account slot in the header is therefore
-either a small client component that fetches its own state after hydration, or an
-island isolated behind `<Suspense>`. The layout itself stays static.
+opts every page beneath `/{tenant}` into dynamic rendering.
+
+An earlier draft of this document justified the rule by saying that would discard
+the one-hour revalidate on facets and the edge caching the catalog depends on.
+That was wrong on both counts, and the correction matters more than the error: a
+rule propped up by a reason that does not survive checking is a rule someone will
+discard along with the reason. Next's data cache is independent of dynamic
+rendering, so `fetchFacets`'s `revalidate: 3600` would survive untouched. And
+every route under `/{tenant}` is already dynamic today — the build marks all of
+them the moment they read `searchParams` or a path param — so there is no static
+rendering left there to lose.
+
+The rule stands on a different footing. Reading a cookie in the layout makes every
+page beneath it unconditionally request-time, which forecloses partial
+prerendering or a static shell later, and it couples every page to a read that
+only the header needs. The account slot is therefore either a small client
+component that fetches its own state after hydration, or an island isolated behind
+`<Suspense>`. The layout itself stays free of request-time APIs.
 
 ## Cross-site request forgery, which is new
 
