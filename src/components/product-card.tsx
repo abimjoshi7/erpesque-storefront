@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AvailabilityBadge } from "@/components/availability-badge";
+import { ImagePlaceholder } from "@/components/image-placeholder";
 import type { Product, Tenant } from "@/lib/erp";
 import { primaryImage } from "@/lib/media";
 import { formatPrice } from "@/lib/money";
@@ -48,7 +49,7 @@ export function ProductCard({
             className="h-full w-full object-contain"
           />
         ) : (
-          <span className="text-xs text-neutral-400">No photo</span>
+          <ImagePlaceholder />
         )}
       </div>
 

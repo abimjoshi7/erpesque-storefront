@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { AddToCart } from "@/components/add-to-cart";
 import { AvailabilityBadge } from "@/components/availability-badge";
 import { CartLink } from "@/components/cart-link";
+import { ImagePlaceholder } from "@/components/image-placeholder";
 import { fetchProduct, type Tenant } from "@/lib/erp";
 import { mediaHref } from "@/lib/media";
 import { formatPrice, priceAsNumber } from "@/lib/money";
@@ -218,8 +219,8 @@ function ProductJsonLd({
 function Gallery({ images, title }: { images: string[]; title: string }) {
   if (images.length === 0) {
     return (
-      <div className="flex aspect-square items-center justify-center rounded-lg bg-neutral-100 text-sm text-neutral-400 dark:bg-neutral-900">
-        No photo
+      <div className="flex aspect-square items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-900">
+        <ImagePlaceholder />
       </div>
     );
   }
