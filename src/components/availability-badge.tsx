@@ -1,3 +1,4 @@
+import { StatusPill, type StatusTone } from "@/design-system";
 import type { Product } from "@/lib/erp";
 
 type Availability = NonNullable<Product["availability"]>;
@@ -14,10 +15,15 @@ const LABELS: Record<Availability, string> = {
   out_of_stock: "Out of stock",
 };
 
-const STYLES: Record<Availability, string> = {
-  in_stock: "text-emerald-700 dark:text-emerald-400",
-  low_stock: "text-amber-700 dark:text-amber-400",
-  out_of_stock: "text-neutral-500 dark:text-neutral-400",
+/**
+ * The same mapping `DSStatusPill.toneForStatus` gives `inStock` / `low` /
+ * `out`, so a shopper looking at the storefront and a clerk looking at the ERP
+ * see one item wearing one color.
+ */
+const TONES: Record<Availability, StatusTone> = {
+  in_stock: "success",
+  low_stock: "warning",
+  out_of_stock: "critical",
 };
 
 /**
@@ -33,9 +39,5 @@ export function AvailabilityBadge({
 }) {
   if (!availability) return null;
 
-  return (
-    <span className={`text-xs font-medium ${STYLES[availability]}`}>
-      {LABELS[availability]}
-    </span>
-  );
+  return <StatusPill tone={TONES[availability]}>{LABELS[availability]}</StatusPill>;
 }

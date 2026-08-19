@@ -1,26 +1,439 @@
 @import "tailwindcss";
 
+/* ──────────────────────────────────────────────────────────────
+   ERPesque design system — web edition.
+
+   A port of `erp/erpesque/lib/design_system/tokens/*.dart`, kept in the same
+   three layers so a change made on either side has an obvious counterpart:
+
+     Layer 0  reference palette      — raw values, never used by a component
+     Layer 1  semantic tokens        — what a color *means*, swapped per theme
+     Layer 2  Tailwind theme mapping — the utilities components actually write
+
+   Components only ever spend Layer 2 (`bg-surface`, `text-ink-subdued`,
+   `border-line`). That is what lets the dark theme be a single block of
+   variable reassignments down here rather than a `dark:` twin on every class
+   in the app.
+   ────────────────────────────────────────────────────────────── */
+
+/* ── Layer 0 — reference palette ───────────────────────────── */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Neutrals (dark-ink scale) */
+  --ref-neutral-0: #ffffff;
+  --ref-neutral-50: #f7f7f7;
+  --ref-neutral-100: #f0f0f0;
+  --ref-neutral-150: #f1f1f1;
+  --ref-neutral-200: #ebebeb;
+  --ref-neutral-300: #d4d4d4;
+  --ref-neutral-400: #c7cbcc;
+  --ref-neutral-500: #8a8a8a;
+  --ref-neutral-550: #6f767e;
+  --ref-neutral-600: #202223;
+  --ref-neutral-700: #303030;
+  --ref-neutral-800: #1a1d1f;
+  --ref-neutral-900: #000000;
+
+  /* Accent — brand yellow */
+  --ref-yellow-200: #fff4cf;
+  --ref-yellow-400: #ffda44;
+
+  /* Gold biscuit — the primary action fill in both themes */
+  --ref-gold-300: #e9cd7a;
+  --ref-gold-400: #ddb94e;
+  --ref-gold-500: #ca9f3b;
+  --ref-gold-600: #ad842c;
+  --ref-gold-700: #8f6b22;
+
+  /* Status */
+  --ref-blue-100: #e8f1ff;
+  --ref-blue-700: #0052b4;
+  --ref-green-100: #e7f6ed;
+  --ref-green-700: #249f58;
+  --ref-amber-100: #fff4e0;
+  --ref-amber-400: #ffbe44;
+  --ref-amber-600: #b97500;
+  --ref-red-100: #fde7ea;
+  --ref-red-400: #f93939;
+  --ref-red-700: #d80027;
+  --ref-purple-100: #f1ebff;
+  --ref-purple-700: #7126ff;
+
+  /* Dark-theme surfaces and ink */
+  --ref-dark-900: #0e1011;
+  --ref-dark-800: #16181a;
+  --ref-dark-700: #1c1f21;
+  --ref-dark-600: #1f2224;
+  --ref-dark-500: #25282b;
+  --ref-dark-400: #2f3236;
+  --ref-dark-300: #2a2d30;
+  --ref-dark-200: #3a3e42;
+  --ref-dark-150: #222528;
+  --ref-dark-text-100: #f0f0f0;
+  --ref-dark-text-200: #a4a8ac;
+  --ref-dark-text-300: #7a7f83;
+  --ref-dark-text-400: #4a4e52;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ── Layer 1 — semantic tokens, light ──────────────────────── */
+
+:root {
+  --bg: var(--ref-neutral-50);
+  --surface: var(--ref-neutral-0);
+  --surface-elevated: var(--ref-neutral-0);
+  --surface-subdued: var(--ref-neutral-100);
+  --overlay: rgb(0 0 0 / 0.4);
+
+  --primary: var(--ref-gold-500);
+  --primary-hover: var(--ref-gold-600);
+  --primary-pressed: var(--ref-gold-700);
+  --on-primary: var(--ref-neutral-700);
+  /* The primary fill is a burnished sweep rather than a flat gold, matching
+     DSButton — flat gold reads dull at button size. */
+  --primary-sheen: linear-gradient(
+    135deg,
+    var(--ref-gold-400) 0%,
+    var(--ref-gold-500) 55%,
+    var(--ref-gold-600) 100%
+  );
+
+  --secondary: var(--ref-neutral-0);
+  --secondary-pressed: var(--ref-neutral-100);
+  --on-secondary: var(--ref-neutral-700);
+
+  --accent: var(--ref-yellow-400);
+  --accent-fg: var(--ref-neutral-700);
+  --accent-soft: var(--ref-yellow-200);
+
+  --ink-strong: var(--ref-neutral-700);
+  --ink: var(--ref-neutral-600);
+  --ink-subdued: var(--ref-neutral-550);
+  --ink-muted: var(--ref-neutral-500);
+  --ink-disabled: var(--ref-neutral-400);
+
+  --line: var(--ref-neutral-200);
+  --line-strong: var(--ref-neutral-300);
+  --line-subtle: var(--ref-neutral-150);
+  --line-active: var(--ref-neutral-700);
+
+  --info: var(--ref-blue-700);
+  --success: var(--ref-green-700);
+  --warning: var(--ref-amber-600);
+  --critical: var(--ref-red-700);
+  --active: var(--ref-purple-700);
+
+  --info-soft: var(--ref-blue-100);
+  --success-soft: var(--ref-green-100);
+  --warning-soft: var(--ref-amber-100);
+  --critical-soft: var(--ref-red-100);
+  --active-soft: var(--ref-purple-100);
+
+  --info-solid: var(--ref-blue-700);
+  --success-solid: var(--ref-green-700);
+  --warning-solid: var(--ref-amber-400);
+  --critical-solid: var(--ref-red-700);
+  --active-solid: var(--ref-purple-700);
+  --on-critical: var(--ref-neutral-0);
+
+  --chart-1: #0052b4;
+  --chart-2: #7126ff;
+  --chart-3: #ffda44;
+  --chart-4: #249f58;
+  --chart-5: #f93939;
+  --chart-6: #8a8a8a;
+
+  /* Elevation. Flutter's BoxShadow list, transcribed. */
+  --elev-xs: 0 1px 2px rgb(0 0 0 / 0.04);
+  --elev-sm: 0 1px 2px rgb(0 0 0 / 0.08);
+  --elev-md: 0 4px 12px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.04);
+  --elev-lg: 0 16px 40px rgb(0 0 0 / 0.12);
+  --elev-xl: 0 8px 25px rgb(0 0 0 / 0.15), 0 4px 10px rgb(0 0 0 / 0.05);
 }
 
+/* ── Layer 1 — semantic tokens, dark ───────────────────────── */
+
+/* Two selectors, one body: the media query is the default, `data-theme` is an
+   explicit override for when a theme switch lands. `:not([data-theme="light"])`
+   keeps a shopper who chose light from being dragged back by their OS. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme="light"]) {
+    --bg: var(--ref-dark-900);
+    --surface: var(--ref-dark-800);
+    --surface-elevated: var(--ref-dark-600);
+    --surface-subdued: var(--ref-dark-700);
+    --overlay: rgb(0 0 0 / 0.6);
+
+    --primary: var(--ref-gold-400);
+    --primary-hover: var(--ref-gold-300);
+    --primary-pressed: var(--ref-gold-500);
+    --on-primary: var(--ref-dark-800);
+    --primary-sheen: linear-gradient(
+      135deg,
+      var(--ref-gold-300) 0%,
+      var(--ref-gold-400) 55%,
+      var(--ref-gold-500) 100%
+    );
+
+    --secondary: var(--ref-dark-700);
+    --secondary-pressed: var(--ref-dark-400);
+    --on-secondary: var(--ref-dark-text-100);
+
+    --accent-soft: rgb(255 218 68 / 0.12);
+
+    --ink-strong: var(--ref-neutral-0);
+    --ink: var(--ref-dark-text-100);
+    --ink-subdued: var(--ref-dark-text-200);
+    --ink-muted: var(--ref-dark-text-300);
+    --ink-disabled: var(--ref-dark-text-400);
+
+    --line: var(--ref-dark-300);
+    --line-strong: var(--ref-dark-200);
+    --line-subtle: var(--ref-dark-150);
+    --line-active: var(--ref-neutral-0);
+
+    --info: #7eb6ff;
+    --success: #6ee59a;
+    --warning: #ffc26b;
+    --critical: #ff7a8a;
+
+    --info-soft: #0e1d36;
+    --success-soft: #0e2418;
+    --warning-soft: #2e2207;
+    --critical-soft: #2f0a10;
+    --active-soft: #1c1233;
+
+    /* Shadows carry no weight on a near-black ground; depth comes from the
+       surface steps above. Deepened rather than tinted so overlays still read. */
+    --elev-xs: 0 1px 2px rgb(0 0 0 / 0.4);
+    --elev-sm: 0 1px 2px rgb(0 0 0 / 0.5);
+    --elev-md: 0 4px 12px rgb(0 0 0 / 0.45), 0 1px 2px rgb(0 0 0 / 0.3);
+    --elev-lg: 0 16px 40px rgb(0 0 0 / 0.6);
+    --elev-xl: 0 8px 25px rgb(0 0 0 / 0.6), 0 4px 10px rgb(0 0 0 / 0.4);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+:root[data-theme="dark"] {
+  --bg: var(--ref-dark-900);
+  --surface: var(--ref-dark-800);
+  --surface-elevated: var(--ref-dark-600);
+  --surface-subdued: var(--ref-dark-700);
+  --overlay: rgb(0 0 0 / 0.6);
+
+  --primary: var(--ref-gold-400);
+  --primary-hover: var(--ref-gold-300);
+  --primary-pressed: var(--ref-gold-500);
+  --on-primary: var(--ref-dark-800);
+  --primary-sheen: linear-gradient(
+    135deg,
+    var(--ref-gold-300) 0%,
+    var(--ref-gold-400) 55%,
+    var(--ref-gold-500) 100%
+  );
+
+  --secondary: var(--ref-dark-700);
+  --secondary-pressed: var(--ref-dark-400);
+  --on-secondary: var(--ref-dark-text-100);
+
+  --accent-soft: rgb(255 218 68 / 0.12);
+
+  --ink-strong: var(--ref-neutral-0);
+  --ink: var(--ref-dark-text-100);
+  --ink-subdued: var(--ref-dark-text-200);
+  --ink-muted: var(--ref-dark-text-300);
+  --ink-disabled: var(--ref-dark-text-400);
+
+  --line: var(--ref-dark-300);
+  --line-strong: var(--ref-dark-200);
+  --line-subtle: var(--ref-dark-150);
+  --line-active: var(--ref-neutral-0);
+
+  --info: #7eb6ff;
+  --success: #6ee59a;
+  --warning: #ffc26b;
+  --critical: #ff7a8a;
+
+  --info-soft: #0e1d36;
+  --success-soft: #0e2418;
+  --warning-soft: #2e2207;
+  --critical-soft: #2f0a10;
+  --active-soft: #1c1233;
+
+  --elev-xs: 0 1px 2px rgb(0 0 0 / 0.4);
+  --elev-sm: 0 1px 2px rgb(0 0 0 / 0.5);
+  --elev-md: 0 4px 12px rgb(0 0 0 / 0.45), 0 1px 2px rgb(0 0 0 / 0.3);
+  --elev-lg: 0 16px 40px rgb(0 0 0 / 0.6);
+  --elev-xl: 0 8px 25px rgb(0 0 0 / 0.6), 0 4px 10px rgb(0 0 0 / 0.4);
+}
+
+/* ── Layer 2 — Tailwind theme ──────────────────────────────── */
+
+/* `inline` matters: it makes Tailwind emit `var(--surface)` in each utility
+   rather than resolving the value at build time, which is the whole mechanism
+   by which the blocks above can retheme the page without a second class. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-subdued: var(--surface-subdued);
+  --color-overlay: var(--overlay);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-pressed: var(--primary-pressed);
+  --color-on-primary: var(--on-primary);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-pressed: var(--secondary-pressed);
+  --color-on-secondary: var(--on-secondary);
+
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-ink-strong: var(--ink-strong);
+  --color-ink: var(--ink);
+  --color-ink-subdued: var(--ink-subdued);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-disabled: var(--ink-disabled);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-line-subtle: var(--line-subtle);
+  --color-line-active: var(--line-active);
+
+  --color-info: var(--info);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-critical: var(--critical);
+  --color-active: var(--active);
+
+  --color-info-soft: var(--info-soft);
+  --color-success-soft: var(--success-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-critical-soft: var(--critical-soft);
+  --color-active-soft: var(--active-soft);
+
+  --color-info-solid: var(--info-solid);
+  --color-success-solid: var(--success-solid);
+  --color-warning-solid: var(--warning-solid);
+  --color-critical-solid: var(--critical-solid);
+  --color-active-solid: var(--active-solid);
+  --color-on-critical: var(--on-critical);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+
+  /* Type scale — DSTypography, in rem so a shopper's browser font size still
+     counts. Negative tracking is the Flutter scale's `letterSpacing` at the
+     same ratio. */
+  --text-h1: 1.75rem;
+  --text-h1--line-height: 1.29;
+  --text-h1--letter-spacing: -0.02em;
+  --text-h1--font-weight: 700;
+
+  --text-h2: 1.375rem;
+  --text-h2--line-height: 1.27;
+  --text-h2--letter-spacing: -0.02em;
+  --text-h2--font-weight: 700;
+
+  --text-h3: 1.125rem;
+  --text-h3--line-height: 1.33;
+  --text-h3--letter-spacing: -0.01em;
+  --text-h3--font-weight: 700;
+
+  --text-h4: 1rem;
+  --text-h4--line-height: 1.38;
+  --text-h4--letter-spacing: -0.01em;
+  --text-h4--font-weight: 600;
+
+  --text-title: 0.9375rem;
+  --text-title--line-height: 1.47;
+  --text-title--letter-spacing: -0.005em;
+  --text-title--font-weight: 600;
+
+  --text-body-lg: 0.9375rem;
+  --text-body-lg--line-height: 1.47;
+  --text-body-lg--letter-spacing: -0.005em;
+
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.43;
+  --text-body--letter-spacing: -0.005em;
+
+  --text-body-sm: 0.8125rem;
+  --text-body-sm--line-height: 1.38;
+  --text-body-sm--letter-spacing: -0.005em;
+
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.33;
+  --text-caption--letter-spacing: -0.005em;
+  --text-caption--font-weight: 500;
+
+  --text-label: 0.6875rem;
+  --text-label--line-height: 1.45;
+  --text-label--letter-spacing: -0.005em;
+  --text-label--font-weight: 600;
+
+  /* Radii — DSRadii */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* Elevation — DSShadows */
+  --shadow-xs: var(--elev-xs);
+  --shadow-sm: var(--elev-sm);
+  --shadow-md: var(--elev-md);
+  --shadow-lg: var(--elev-lg);
+  --shadow-xl: var(--elev-xl);
+
+  /* Motion — DSAnimations */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Breakpoints DSBreakpoints adds on top of Tailwind's defaults, which are
+     left alone so existing `sm:`/`lg:` classes keep their meaning. */
+  --breakpoint-grid: 600px;
+  --breakpoint-split: 960px;
+  --breakpoint-wide: 1440px;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+
+/* Durations from DSAnimations. Not a Tailwind namespace, so they are spent as
+   `duration-(--duration-fast)` or in hand-written transitions. */
+:root {
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+}
+
+@layer base {
+  body {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    letter-spacing: var(--text-body--letter-spacing);
+  }
+
+  /* Money and quantities line up column-wise wherever they appear. The Flutter
+     side gets this from DSTypography.mono's tabularFigures feature. */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus treatment for the whole shop, so no component has to remember
+     to carry its own. */
+  :focus-visible {
+    outline: 2px solid var(--color-line-active);
+    outline-offset: 2px;
+  }
 }

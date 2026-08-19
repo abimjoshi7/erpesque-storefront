@@ -11,7 +11,7 @@
 export function ImagePlaceholder({ className = "" }: { className?: string }) {
   return (
     <div
-      className={`flex flex-col items-center justify-center gap-2 text-neutral-300 dark:text-neutral-700 ${className}`}
+      className={`flex flex-col items-center justify-center gap-2 text-ink-disabled ${className}`}
     >
       <svg
         viewBox="0 0 24 24"
@@ -27,9 +27,7 @@ export function ImagePlaceholder({ className = "" }: { className?: string }) {
         <circle cx="9" cy="9" r="1.75" />
         <path d="M21 15.5 16.5 11 5 21" />
       </svg>
-      <span className="text-xs font-medium text-neutral-400 dark:text-neutral-600">
-        No photo yet
-      </span>
+      <span className="text-caption text-ink-muted">No photo yet</span>
     </div>
   );
 }

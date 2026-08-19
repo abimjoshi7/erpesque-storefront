@@ -17,7 +17,7 @@ export function CartLink({ tenant }: { tenant: string }) {
   return (
     <Link
       href={`/${tenant}/cart`}
-      className="text-sm underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+      className="text-body font-medium text-ink underline underline-offset-4 transition-colors duration-(--duration-fast) ease-standard hover:text-ink-strong"
     >
       Cart{count > 0 ? ` (${count})` : ""}
     </Link>

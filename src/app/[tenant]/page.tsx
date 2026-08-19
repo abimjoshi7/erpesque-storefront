@@ -1,15 +1,24 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
-import { CartLink } from "@/components/cart-link";
 import { FacetNav } from "@/components/facet-nav";
+import { FilterPanel } from "@/components/filter-panel";
 import { ProductCard } from "@/components/product-card";
+import { SortMenu } from "@/components/sort-menu";
+import { ButtonLink, Container, EmptyState, Text } from "@/design-system";
+import {
+  isFiltered,
+  listingHref,
+  readFilters,
+  type ListingFilters,
+  type RawListingParams,
+} from "@/lib/catalog-url";
 import { fetchCatalog, fetchFacets } from "@/lib/erp";
+import { majorToMinor } from "@/lib/money";
 
 type PageProps = {
   params: Promise<{ tenant: string }>;
-  searchParams: Promise<{ q?: string; category?: string; brand?: string; page?: string }>;
+  searchParams: Promise<RawListingParams>;
 };
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -37,19 +46,33 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function CatalogPage({ params, searchParams }: PageProps) {
   const { tenant } = await params;
-  const { q, category, brand, page } = await searchParams;
+  const filters = readFilters(await searchParams);
 
-  // In parallel: the two are independent, and awaiting them in sequence would
-  // add the facet round trip to every listing render for nothing.
-  const [catalog, facets] = await Promise.all([
-    fetchCatalog(tenant, {
-      q,
-      category,
-      brand,
-      page: page ? Number(page) : undefined,
-    }),
-    fetchFacets(tenant),
-  ]);
+  // Facets first, not in parallel with the catalog, because the price bounds in
+  // the URL are in major units and converting them needs the shop's currency.
+  // It costs nothing: the shop layout above has already made this exact request
+  // to name the shop in the header, and Next dedupes it within one render.
+  const facets = await fetchFacets(tenant);
+  const currency = facets?.tenant.currency;
+
+  const catalog = await fetchCatalog(tenant, {
+    q: filters.q,
+    category: filters.category,
+    brand: filters.brand,
+    sort: filters.sort,
+    page: filters.page,
+    // The ERP prices in minor units; the URL is written in the ones a shopper
+    // reads. The conversion happens here and nowhere else.
+    minPrice:
+      currency && filters.minPrice !== undefined
+        ? majorToMinor(filters.minPrice, currency)
+        : undefined,
+    maxPrice:
+      currency && filters.maxPrice !== undefined
+        ? majorToMinor(filters.maxPrice, currency)
+        : undefined,
+    inStock: filters.inStock,
+  });
 
   // The ERP returns 404 for an unknown tenant, a suspended one, and one that
   // has not enabled the storefront module alike — so this page cannot be used
@@ -57,35 +80,73 @@ export default async function CatalogPage({ params, searchParams }: PageProps) {
   if (!catalog) notFound();
 
   const { products, tenant: shop } = catalog;
-  const filters = { q, category, brand };
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-12">
-      <header className="mb-10 border-b border-neutral-200 pb-6 dark:border-neutral-800">
-        <div className="flex items-baseline justify-between gap-4">
-          <h1 className="text-3xl font-semibold tracking-tight">{shop.name}</h1>
-          <CartLink tenant={tenant} />
+    <Container as="main" className="py-12">
+      <div className="mb-10 border-b border-line pb-6">
+        {/* The shop's own name is the header's job. This heading describes the
+            listing instead, so a filtered page says what it is filtered to
+            rather than repeating the shop name at every URL. */}
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <Text as="h1" variant="displayLarge" className="text-balance">
+              {headingFor(filters)}
+            </Text>
+            <Text variant="bodySmall" tone="subdued" className="mt-2">
+              {catalog.total} {catalog.total === 1 ? "product" : "products"}
+              {filters.category ? ` in ${filters.category}` : ""}
+              {filters.brand ? ` by ${filters.brand}` : ""}
+              {filters.q ? ` matching “${filters.q}”` : ""}
+            </Text>
+          </div>
+
+          {/* Offered only once there is more than one page's worth to reorder.
+              Sorting four products is a control that changes nothing. */}
+          {catalog.total > 1 ? <SortMenu tenant={tenant} filters={filters} /> : null}
         </div>
-        <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
-          {catalog.total} {catalog.total === 1 ? "product" : "products"}
-          {category ? ` in ${category}` : ""}
-          {brand ? ` by ${brand}` : ""}
-          {q ? ` matching “${q}”` : ""}
-        </p>
-      </header>
+      </div>
 
       <div className="flex flex-col gap-10 lg:flex-row">
         {facets ? (
-          <aside className="lg:w-48 lg:shrink-0">
+          <aside className="lg:w-56 lg:shrink-0">
             <FacetNav tenant={tenant} facets={facets} current={filters} />
+            <FilterPanel
+              tenant={tenant}
+              filters={filters}
+              currency={facets.tenant.currency}
+            />
           </aside>
         ) : null}
 
         <div className="flex-1">
           {products.length === 0 ? (
-            <p className="text-neutral-600 dark:text-neutral-400">
-              Nothing here yet. Try a different search.
-            </p>
+            <EmptyState
+              title={
+                isFiltered(filters)
+                  ? "Nothing matched that"
+                  : "This shop has not published anything yet"
+              }
+              description={
+                isFiltered(filters)
+                  ? "Try a broader search, or drop one of the filters."
+                  : "Check back soon — the shop is still setting up."
+              }
+              // A dead end is where shoppers leave. When something was
+              // filtering the listing, the way out of the empty page is the
+              // unfiltered one — keeping the ordering they chose, which is a
+              // preference rather than a narrowing.
+              action={
+                isFiltered(filters) ? (
+                  <ButtonLink
+                    href={listingHref(tenant, { sort: filters.sort })}
+                    variant="secondary"
+                    size="sm"
+                  >
+                    Show everything
+                  </ButtonLink>
+                ) : null
+              }
+            />
           ) : (
             <ul className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {products.map((product) => (
@@ -104,7 +165,7 @@ export default async function CatalogPage({ params, searchParams }: PageProps) {
           />
         </div>
       </div>
-    </main>
+    </Container>
   );
 }
 
@@ -126,39 +187,47 @@ function Pagination({
   tenant: string;
   page: number;
   totalPages: number;
-  filters: { q?: string; category?: string; brand?: string };
+  filters: ListingFilters;
 }) {
   if (totalPages <= 1) return null;
 
-  const href = (target: number) => {
-    const search = new URLSearchParams();
-    if (filters.q) search.set("q", filters.q);
-    if (filters.category) search.set("category", filters.category);
-    if (filters.brand) search.set("brand", filters.brand);
-    if (target > 1) search.set("page", String(target));
-    const query = search.toString();
-    return query ? `/${tenant}?${query}` : `/${tenant}`;
-  };
+  const href = (target: number) => listingHref(tenant, { ...filters, page: target });
 
   return (
-    <nav className="mt-12 flex items-center justify-between text-sm" aria-label="Pagination">
+    <nav
+      className="mt-12 flex items-center justify-between gap-4"
+      aria-label="Pagination"
+    >
       {page > 1 ? (
-        <Link href={href(page - 1)} className="underline underline-offset-4">
+        <ButtonLink href={href(page - 1)} variant="secondary" size="sm">
           ← Previous
-        </Link>
+        </ButtonLink>
       ) : (
         <span />
       )}
-      <span className="text-neutral-500 tabular-nums">
+      <Text variant="bodySmall" tone="muted" className="tabular-nums">
         Page {page} of {totalPages}
-      </span>
+      </Text>
       {page < totalPages ? (
-        <Link href={href(page + 1)} className="underline underline-offset-4">
+        <ButtonLink href={href(page + 1)} variant="secondary" size="sm">
           Next →
-        </Link>
+        </ButtonLink>
       ) : (
         <span />
       )}
     </nav>
   );
+}
+
+/**
+ * What this listing is, in the shopper's words.
+ *
+ * A search and a facet can both be applied at once, and the search is the more
+ * specific of the two — a shopper who typed "rice" inside Grocery is looking
+ * for rice, not for Grocery.
+ */
+function headingFor({ q, category, brand }: ListingFilters): string {
+  if (q) return `Results for “${q}”`;
+  if (category && brand) return `${brand} in ${category}`;
+  return category ?? brand ?? "All products";
 }

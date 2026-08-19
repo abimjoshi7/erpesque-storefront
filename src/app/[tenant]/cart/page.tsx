@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
 import { CartView } from "@/app/[tenant]/cart/cart-view";
-import { fetchCatalog } from "@/lib/erp";
+import { Text } from "@/design-system";
+import { fetchShop } from "@/lib/erp";
 
 type PageProps = { params: Promise<{ tenant: string }> };
 
@@ -16,22 +16,19 @@ export const metadata: Metadata = {
 export default async function CartPage({ params }: PageProps) {
   const { tenant } = await params;
 
-  // Resolved on the server purely to enforce the same shop-exists check the
-  // other pages get — a cart page for a disabled tenant should 404 too, rather
-  // than rendering an empty shell that only fails once someone tries to buy.
-  const catalog = await fetchCatalog(tenant, { limit: 1 });
-  if (!catalog) notFound();
+  // The layout has already established that this shop is open; this call is
+  // deduped against its own and exists only to name the shop in the empty-cart
+  // copy. `notFound` stays as the type-level floor rather than a second check.
+  const shop = await fetchShop(tenant);
+  if (!shop) notFound();
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <header className="mb-8 flex items-baseline justify-between gap-4 border-b border-neutral-200 pb-6 dark:border-neutral-800">
-        <h1 className="text-2xl font-semibold tracking-tight">Your cart</h1>
-        <Link href={`/${tenant}`} className="text-sm underline underline-offset-4">
-          ← {catalog.tenant.name}
-        </Link>
-      </header>
+      <Text as="h1" variant="displayMedium" className="mb-8 border-b border-line pb-6">
+        Your cart
+      </Text>
 
-      <CartView tenant={tenant} shopName={catalog.tenant.name} />
+      <CartView tenant={tenant} shopName={shop.name} />
     </main>
   );
 }

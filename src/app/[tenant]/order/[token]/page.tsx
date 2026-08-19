@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
+import { StatusPill, Text, type StatusTone } from "@/design-system";
 import { fetchOrderStatus } from "@/lib/erp";
 import { formatPrice } from "@/lib/money";
 
@@ -29,26 +29,39 @@ export const metadata: Metadata = {
 /** Personal and changes as the shop works through it — never prerendered. */
 export const dynamic = "force-dynamic";
 
-const STATUS_COPY: Record<string, { label: string; detail: string }> = {
+/**
+ * Each ERP status, in the shopper's words and in the design system's tones —
+ * the same pairing `DSStatusPill.toneForStatus` makes on the ERP side, so an
+ * order that is amber on the clerk's screen is amber on the shopper's.
+ */
+const STATUS_COPY: Record<
+  string,
+  { label: string; detail: string; tone: StatusTone }
+> = {
   pending: {
     label: "Waiting for the shop",
     detail: "The shop will call you to confirm before delivering.",
+    tone: "warning",
   },
   confirmed: {
     label: "Confirmed",
     detail: "The shop has accepted your order and is preparing it.",
+    tone: "info",
   },
   partially_sent: {
     label: "Partly on its way",
     detail: "Some of your order has been sent; the rest is following.",
+    tone: "info",
   },
   delivered: {
     label: "Delivered",
     detail: "This order has been delivered in full.",
+    tone: "success",
   },
   cancelled: {
     label: "Cancelled",
     detail: "This order will not be delivered.",
+    tone: "critical",
   },
 };
 
@@ -66,33 +79,34 @@ export default async function OrderStatusPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
-      <Link
-        href={`/${tenant}`}
-        className="text-sm text-neutral-600 underline underline-offset-4 dark:text-neutral-400"
-      >
-        ← Keep shopping
-      </Link>
-
-      <h1 className="mt-6 text-2xl font-semibold tracking-tight">
+      <Text as="h1" variant="displayMedium">
         Order {order.orderNumber ?? ""}
-      </h1>
+      </Text>
 
-      <p className="mt-4 inline-flex rounded-full bg-neutral-100 px-3 py-1 text-sm dark:bg-neutral-900">
-        {copy.label}
-      </p>
-      <p className="mt-3 text-neutral-700 dark:text-neutral-300">{copy.detail}</p>
+      {order.orderDate ? (
+        <Text variant="bodySmall" tone="muted" className="mt-1">
+          Placed {formatOrderDate(order.orderDate)}
+        </Text>
+      ) : null}
+
+      <div className="mt-4">
+        <StatusPill tone={copy.tone}>{copy.label}</StatusPill>
+      </div>
+      <Text variant="bodyLarge" tone="subdued" className="mt-3">
+        {copy.detail}
+      </Text>
 
       <section className="mt-8">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+        <Text as="h2" variant="labelSmall" tone="muted" className="uppercase">
           What you ordered
-        </h2>
-        <ul className="mt-3 divide-y divide-neutral-200 dark:divide-neutral-800">
+        </Text>
+        <ul className="mt-3 divide-y divide-line">
           {(order.lines ?? []).map((line, index) => (
-            <li key={index} className="flex justify-between gap-4 py-3 text-sm">
+            <li key={index} className="flex justify-between gap-4 py-3 text-body-sm">
               <span>
                 {line.title}
                 {line.quantity && line.quantity !== 1 ? (
-                  <span className="text-neutral-500"> × {line.quantity}</span>
+                  <span className="text-ink-muted"> × {line.quantity}</span>
                 ) : null}
               </span>
               <span className="tabular-nums">
@@ -101,36 +115,62 @@ export default async function OrderStatusPage({ params }: PageProps) {
             </li>
           ))}
         </ul>
-        <p className="mt-4 flex justify-between border-t border-neutral-200 pt-3 font-medium dark:border-neutral-800">
+        <p className="mt-4 flex justify-between border-t border-line pt-3 text-title font-semibold text-ink-strong">
           <span>Total</span>
           <span className="tabular-nums">
             {currency ? formatPrice(order.totalMinor, currency) : null}
           </span>
         </p>
-        <p className="mt-2 text-xs text-neutral-500">Payment is on delivery.</p>
+        <Text variant="caption" tone="muted" className="mt-2">
+          Payment is on delivery.
+        </Text>
       </section>
 
-      <section className="mt-8 text-sm text-neutral-700 dark:text-neutral-300">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+      <section className="mt-8 text-body-sm text-ink">
+        <Text as="h2" variant="labelSmall" tone="muted" className="uppercase">
           Delivering to
-        </h2>
+        </Text>
         <p className="mt-3">{order.contactName}</p>
         <p>{order.deliveryAddress}</p>
         {order.deliveryLandmark ? (
-          <p className="text-neutral-500">{order.deliveryLandmark}</p>
+          <p className="text-ink-muted">{order.deliveryLandmark}</p>
         ) : null}
-        {order.note ? <p className="mt-3 italic text-neutral-500">“{order.note}”</p> : null}
+        {order.note ? (
+          <p className="mt-3 text-ink-muted italic">“{order.note}”</p>
+        ) : null}
       </section>
 
       {order.cancellable ? (
         <CancelOrder tenant={tenant} token={token} />
       ) : (
-        <p className="mt-8 text-sm text-neutral-500">
+        <Text variant="bodySmall" tone="muted" className="mt-8">
           {order.status === "cancelled"
             ? "This order has been cancelled."
             : "The shop has started on this order, so it can no longer be cancelled here. Call them if something has changed."}
-        </p>
+        </Text>
       )}
     </main>
   );
+}
+
+/**
+ * The order's date, in the shopper's own locale-independent long form.
+ *
+ * Fixed to `en-GB` rather than the visitor's locale on purpose: this page is
+ * server-rendered, the server has no idea what the browser's locale is, and
+ * formatting with one guess on the server and another on the client is a
+ * hydration mismatch on a page about someone's money.
+ *
+ * The time of day is left off. It is a delivery order placed by phone-and-van;
+ * "19 August 2026" is what a shopper checks it against.
+ */
+function formatOrderDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
 }

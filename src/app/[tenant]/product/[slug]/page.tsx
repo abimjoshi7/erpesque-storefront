@@ -4,8 +4,8 @@ import type { Metadata } from "next";
 
 import { AddToCart } from "@/components/add-to-cart";
 import { AvailabilityBadge } from "@/components/availability-badge";
-import { CartLink } from "@/components/cart-link";
 import { ImagePlaceholder } from "@/components/image-placeholder";
+import { Text } from "@/design-system";
 import { fetchProduct, type Tenant } from "@/lib/erp";
 import { mediaHref } from "@/lib/media";
 import { formatPrice, priceAsNumber } from "@/lib/money";
@@ -73,52 +73,70 @@ export default async function ProductPage({ params }: PageProps) {
         currency={shop.currency}
         images={images}
       />
-      <div className="flex items-baseline justify-between gap-4">
-        <Link
-          href={`/${tenant}`}
-          className="text-sm text-neutral-600 underline underline-offset-4 dark:text-neutral-400"
-        >
-          ← {shop.name}
-        </Link>
-        <CartLink tenant={tenant} />
-      </div>
+      {/* Real links, not decoration: the category a product sits in is a page
+          of the shop, and a shopper who liked this bottle wants the shelf it
+          came off. The listing already accepts these exact values as filters,
+          so there is nothing to invent here. */}
+      <nav aria-label="Breadcrumb" className="text-body-sm text-ink-subdued">
+        <ol className="flex flex-wrap items-center gap-x-2">
+          <li>
+            <Link
+              href={`/${tenant}`}
+              className="underline underline-offset-4 hover:text-ink-strong"
+            >
+              {shop.name}
+            </Link>
+          </li>
+          {product.category ? (
+            <li className="flex items-center gap-2">
+              <span aria-hidden="true">/</span>
+              <Link
+                href={`/${tenant}?category=${encodeURIComponent(product.category)}`}
+                className="underline underline-offset-4 hover:text-ink-strong"
+              >
+                {product.category}
+              </Link>
+            </li>
+          ) : null}
+        </ol>
+      </nav>
 
       <article className="mt-8 grid gap-10 md:grid-cols-2">
         <Gallery images={images} title={product.title} />
 
         <div>
-          {product.category ? (
-            <p className="text-xs uppercase tracking-wide text-neutral-500">
-              {product.category}
-            </p>
-          ) : null}
-
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-balance">
+          <Text as="h1" variant="displayLarge" className="text-balance">
             {product.title}
-          </h1>
+          </Text>
 
           {product.brand ? (
-            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-              {product.brand}
+            <p className="mt-1">
+              <Link
+                href={`/${tenant}?brand=${encodeURIComponent(product.brand)}`}
+                className="text-body-sm text-ink-subdued underline underline-offset-4 hover:text-ink-strong"
+              >
+                More by {product.brand}
+              </Link>
             </p>
           ) : null}
 
           <div className="mt-6 flex items-baseline gap-4">
-            <p className="text-2xl tabular-nums">
+            <Text as="p" variant="displayMedium" className="tabular-nums">
               {formatPrice(product.priceMinor, shop.currency!)}
-            </p>
+            </Text>
             <AvailabilityBadge availability={product.availability} />
           </div>
 
           {product.description ? (
-            <p className="mt-6 leading-relaxed text-neutral-700 dark:text-neutral-300">
+            <Text variant="bodyLarge" tone="subdued" className="mt-6 leading-relaxed">
               {product.description}
-            </p>
+            </Text>
           ) : null}
 
           <AddToCart
             tenant={tenant}
             slug={product.slug!}
+            title={product.title}
             disabled={unpriced}
             outOfStock={outOfStock}
           />
@@ -219,7 +237,7 @@ function ProductJsonLd({
 function Gallery({ images, title }: { images: string[]; title: string }) {
   if (images.length === 0) {
     return (
-      <div className="flex aspect-square items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-900">
+      <div className="flex aspect-square items-center justify-center rounded-lg bg-surface-subdued">
         <ImagePlaceholder />
       </div>
     );
@@ -237,7 +255,12 @@ function Gallery({ images, title }: { images: string[]; title: string }) {
           // reader announce it once per photograph.
           alt={index === 0 ? title : ""}
           loading={index === 0 ? "eager" : "lazy"}
-          className="w-full rounded-lg bg-neutral-100 object-contain dark:bg-neutral-900"
+          // A fixed box, as on the card, because the ERP does not report a
+          // photograph's dimensions and an `<img>` without them is a zero-height
+          // element until the bytes land — so the page assembles, then jumps by
+          // the height of every picture on it. `object-contain` keeps the
+          // merchant's framing intact inside the box.
+          className="aspect-square w-full rounded-lg bg-surface-subdued object-contain"
         />
       ))}
     </div>

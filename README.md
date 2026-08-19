@@ -77,9 +77,37 @@ currently charges — the total displayed is never an input to anything.
 
 ## Status
 
-Catalog listing, search, category filter, pagination, product pages, cart, and
-checkout. Orders land in the ERP as draft sales orders awaiting staff approval;
-payment is on delivery.
+Every public `/storefront/*` endpoint the ERP exposes is consumed here:
 
-Not built yet: product images, stock badges, pricelist-resolved pricing,
-delivery charges, and the order-status page the checkout's status token is for.
+| ERP endpoint | Where it surfaces |
+| --- | --- |
+| `GET /catalog` | `/{tenant}` — listing, search, facet filter, pagination |
+| `GET /facets` | Category and brand navigation, and the shop-exists check |
+| `GET /product/{slug}` | `/{tenant}/product/{slug}`, with schema.org `Product` |
+| `GET /media/{fileId}` | Proxied through `/{tenant}/media/{fileId}` |
+| `GET /sitemap` | `/{tenant}/sitemap.xml` |
+| `POST /quote` | Every figure the cart shows |
+| `POST /order` | Checkout |
+| `GET /order/{token}` | `/{tenant}/order/{token}` |
+| `POST /order/{token}/cancel` | Self-cancel while the order is still a draft |
+
+Orders land in the ERP as draft sales orders awaiting staff approval; payment is
+on delivery.
+
+The shop's chrome — name, search box, cart count, footer — lives in
+`src/app/[tenant]/layout.tsx`, which is also where the shop-exists check
+happens, so every page beneath it 404s together. Each segment has its own
+`loading.tsx`, `error.tsx` and `not-found.tsx`, so an ERP that is down looks
+different from a shop that is closed.
+
+### Known gaps
+
+- **Images are served at their original size.** The media route streams the
+  ERP's bytes through unchanged, and the ERP stores originals — a single
+  photograph in the nsbs catalog is 400 KB. A listing of 24 of those is a heavy
+  page on a phone. Resizing belongs at the edge (Cloudflare Images, or a
+  `cf-resize` fetch in the Worker), not in this app.
+- **The catalog has no sort.** The ERP orders by the merchant's `sort_weight`
+  and offers no `?sort=`, so there is nothing to render a control for yet.
+- **`sitemap.truncated` is ignored.** The ERP caps the slug list; a shop large
+  enough to hit that cap needs a paginated sitemap index here.

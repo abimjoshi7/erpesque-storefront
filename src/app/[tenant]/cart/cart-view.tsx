@@ -6,8 +6,21 @@ import { useEffect, useState } from "react";
 import { Turnstile } from "@/components/turnstile";
 
 import { AvailabilityBadge } from "@/components/availability-badge";
+import { ImagePlaceholder } from "@/components/image-placeholder";
+import {
+  Button,
+  ButtonLink,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Notice,
+  QuantityStepper,
+  Text,
+} from "@/design-system";
 import { useCart } from "@/lib/cart";
 import type { CartLine, PlacedOrder, Quote } from "@/lib/erp";
+import { mediaHref } from "@/lib/media";
 import { formatPrice } from "@/lib/money";
 
 type Props = { tenant: string; shopName: string };
@@ -89,134 +102,250 @@ export function CartView({ tenant, shopName }: Props) {
 
   if (lines.length === 0) {
     return (
-      <section>
-        <p className="text-neutral-600 dark:text-neutral-400">Your cart is empty.</p>
-        <Link href={`/${tenant}`} className="mt-4 inline-block underline underline-offset-4">
-          Browse {shopName}
-        </Link>
-      </section>
+      <EmptyState
+        title="Your cart is empty"
+        description="Nothing here yet. Anything you add is kept in this browser until you order."
+        action={
+          <ButtonLink href={`/${tenant}`} variant="secondary">
+            Browse {shopName}
+          </ButtonLink>
+        }
+      />
     );
   }
 
   const currency = quote?.tenant.currency;
 
+  const blockedSlug = quoteError ? slugNamedIn(quoteError, lines) : null;
+
   return (
-    <section className="flex flex-col gap-10">
-      <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
-        {lines.map((line) => {
-          // Matched by slug rather than index: a failed quote returns no lines
-          // at all, and positions would silently mispair titles with rows.
-          const priced = quote?.lines.find((entry) => entry.slug === line.slug);
-          return (
-            <li key={line.slug} className="flex items-center justify-between gap-4 py-4">
-              <div className="min-w-0">
-                <p className="truncate font-medium">{priced?.title ?? line.slug}</p>
-                {priced && currency ? (
-                  <p className="text-sm text-neutral-600 tabular-nums dark:text-neutral-400">
-                    {formatPrice(priced.unitPriceMinor, currency)} each
-                  </p>
-                ) : null}
-                {/* Multi-buy savings are shown, not silently applied. A total
-                    lower than price × quantity looks like a mistake unless the
-                    shopper is told why it is lower. */}
-                {priced?.discountMinor && currency ? (
-                  <p className="text-sm text-emerald-700 tabular-nums dark:text-emerald-400">
-                    Multi-buy saving {formatPrice(priced.discountMinor, currency)}
-                  </p>
-                ) : null}
-                {priced?.availability ? (
-                  <p className="mt-0.5">
-                    <AvailabilityBadge availability={priced.availability} />
-                  </p>
-                ) : null}
-              </div>
+    <section className="flex flex-col gap-10 lg:flex-row lg:items-start">
+      <div className="min-w-0 flex-1">
+        <ul className="divide-y divide-line border-y border-line">
+          {lines.map((line) => (
+            <CartRow
+              key={line.slug}
+              tenant={tenant}
+              line={line}
+              // Matched by slug rather than index: a failed quote returns no
+              // lines at all, and positions would silently mispair titles.
+              priced={quote?.lines.find((entry) => entry.slug === line.slug)}
+              currency={currency}
+              onQuantity={(quantity) => setQuantity(line.slug, quantity)}
+              onRemove={() => remove(line.slug)}
+            />
+          ))}
+        </ul>
 
-              <div className="flex shrink-0 items-center gap-3">
-                <label className="sr-only" htmlFor={`qty-${line.slug}`}>
-                  Quantity for {priced?.title ?? line.slug}
-                </label>
-                <input
-                  id={`qty-${line.slug}`}
-                  type="number"
-                  min={1}
-                  max={999}
-                  value={line.quantity}
-                  onChange={(event) => setQuantity(line.slug, Number(event.target.value))}
-                  className="w-16 rounded-md border border-neutral-300 px-2 py-1 text-right tabular-nums dark:border-neutral-700 dark:bg-neutral-900"
-                />
-                {priced && currency ? (
-                  <span className="w-28 text-right tabular-nums">
-                    {formatPrice(priced.lineTotalMinor, currency)}
-                  </span>
-                ) : (
-                  <span className="w-28" />
-                )}
-                <button
-                  type="button"
-                  onClick={() => remove(line.slug)}
-                  className="text-sm text-neutral-500 underline underline-offset-4 hover:text-neutral-800 dark:hover:text-neutral-200"
-                >
-                  Remove
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+        {quoteError ? (
+          <Notice tone="critical" className="mt-6">
+            <p>{quoteError}</p>
+            {/* The ERP refuses the whole cart over one bad line, and until that
+                line goes the shopper cannot be quoted at all — so a message
+                with nothing to press is a dead end. The button only appears
+                when the refusal names something actually in this cart. */}
+            {blockedSlug ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-3"
+                onClick={() => remove(blockedSlug)}
+              >
+                Remove it and carry on
+              </Button>
+            ) : null}
+          </Notice>
+        ) : null}
 
-      {quoteError ? (
-        <p className="rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-          {quoteError}
-        </p>
-      ) : null}
+        <Checkout
+          tenant={tenant}
+          disabled={pricing || !quote}
+          onPlaced={(order) => {
+            clear();
+            setPlaced(order);
+          }}
+          lines={lines}
+        />
+      </div>
 
-      {quote && currency ? (
-        <dl className="ml-auto w-full max-w-xs space-y-2 text-sm">
-          <div className="flex justify-between">
-            <dt className="text-neutral-600 dark:text-neutral-400">Subtotal</dt>
-            <dd className="tabular-nums">{formatPrice(quote.subtotalMinor, currency)}</dd>
-          </div>
-          {quote.taxMinor > 0 ? (
-            <div className="flex justify-between">
-              <dt className="text-neutral-600 dark:text-neutral-400">Tax</dt>
-              <dd className="tabular-nums">{formatPrice(quote.taxMinor, currency)}</dd>
-            </div>
-          ) : null}
-          {quote.delivery ? (
-            <div className="flex justify-between">
-              <dt className="text-neutral-600 dark:text-neutral-400">
-                {quote.delivery.title}
-              </dt>
-              <dd className="tabular-nums">
-                {quote.delivery.waived
-                  ? "Free"
-                  : formatPrice(quote.delivery.amountMinor, currency)}
-              </dd>
-            </div>
-          ) : null}
-          <div className="flex justify-between border-t border-neutral-200 pt-2 text-base font-medium dark:border-neutral-800">
-            <dt>Total</dt>
-            <dd className="tabular-nums">{formatPrice(quote.totalMinor, currency)}</dd>
-          </div>
-          <p className="pt-1 text-xs text-neutral-500">
-            Payment is on delivery.
-            {quote.delivery && !quote.delivery.waived && quote.delivery.freeOverMinor
-              ? ` Delivery is free over ${formatPrice(quote.delivery.freeOverMinor, currency)}.`
-              : ""}
-          </p>
-        </dl>
-      ) : null}
-
-      <Checkout
-        tenant={tenant}
-        disabled={pricing || !quote}
-        onPlaced={(order) => {
-          clear();
-          setPlaced(order);
-        }}
-        lines={lines}
-      />
+      {/* Sticky only where there is height to spare. On a phone the summary
+          sits after the lines, which is the order a shopper reads them in. */}
+      <aside className="w-full lg:sticky lg:top-6 lg:w-80 lg:shrink-0">
+        <Summary quote={quote} currency={currency} pricing={pricing} />
+      </aside>
     </section>
+  );
+}
+
+/**
+ * One line of the basket.
+ *
+ * `priced` is absent until the first quote lands and while a failed one is on
+ * screen, so every figure here is optional and the row still renders without
+ * them — a cart that blanks out because the server is slow looks broken.
+ */
+function CartRow({
+  tenant,
+  line,
+  priced,
+  currency,
+  onQuantity,
+  onRemove,
+}: {
+  tenant: string;
+  line: CartLine;
+  priced: Quote["lines"][number] | undefined;
+  currency: Quote["tenant"]["currency"] | undefined;
+  onQuantity: (quantity: number) => void;
+  onRemove: () => void;
+}) {
+  const title = priced?.title ?? line.slug;
+  const image = priced?.image ? mediaHref(tenant, priced.image) : null;
+
+  return (
+    <li className="flex gap-4 py-4">
+      <Link
+        href={`/${tenant}/product/${line.slug}`}
+        // Decorative here: the title beside it is the same link, and a screen
+        // reader announcing the product twice per row makes a cart tedious.
+        tabIndex={-1}
+        aria-hidden="true"
+        className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface-subdued"
+      >
+        {image ? (
+          // eslint-disable-next-line @next/next/no-img-element -- see the note on ProductCard.
+          <img src={image} alt="" loading="lazy" className="size-full object-contain" />
+        ) : (
+          <ImagePlaceholder className="scale-75" />
+        )}
+      </Link>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <Link
+          href={`/${tenant}/product/${line.slug}`}
+          className="text-title font-semibold text-ink-strong hover:underline hover:underline-offset-4"
+        >
+          {title}
+        </Link>
+
+        {priced && currency ? (
+          <Text variant="bodySmall" tone="subdued" className="tabular-nums">
+            {formatPrice(priced.unitPriceMinor, currency)} each
+          </Text>
+        ) : null}
+
+        {/* Multi-buy savings are shown, not silently applied. A total lower
+            than price × quantity looks like a mistake unless the shopper is
+            told why it is lower. */}
+        {priced?.discountMinor && currency ? (
+          <Text variant="bodySmall" tone="success" className="tabular-nums">
+            Multi-buy saving {formatPrice(priced.discountMinor, currency)}
+          </Text>
+        ) : null}
+
+        {priced?.availability ? (
+          <div className="mt-0.5">
+            <AvailabilityBadge availability={priced.availability} />
+          </div>
+        ) : null}
+
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <QuantityStepper
+            size="sm"
+            value={line.quantity}
+            onChange={onQuantity}
+            label={`Quantity of ${title}`}
+          />
+          <Button variant="tertiary" size="sm" onClick={onRemove}>
+            Remove
+          </Button>
+        </div>
+      </div>
+
+      <div className="shrink-0 text-right">
+        {priced && currency ? (
+          <Text variant="titleLarge" tone="strong" className="tabular-nums">
+            {formatPrice(priced.lineTotalMinor, currency)}
+          </Text>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * What the basket comes to.
+ *
+ * Every figure is the server's. While a re-quote is in flight the last good
+ * total stays on screen dimmed rather than disappearing — a total that blinks
+ * out on each quantity tap reads as a page losing track of the order.
+ */
+function Summary({
+  quote,
+  currency,
+  pricing,
+}: {
+  quote: Quote | null;
+  currency: Quote["tenant"]["currency"] | undefined;
+  pricing: boolean;
+}) {
+  if (!quote || !currency) {
+    return (
+      <Card>
+        <Text variant="bodySmall" tone="muted">
+          {pricing ? "Pricing your cart…" : "Your total will appear here."}
+        </Text>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      header={
+        <Text as="h2" variant="headlineMedium">
+          Order summary
+        </Text>
+      }
+      className={pricing ? "opacity-60 transition-opacity" : "transition-opacity"}
+    >
+      <dl className="space-y-2 text-body-sm">
+        <div className="flex justify-between gap-4">
+          <dt className="text-ink-subdued">Items</dt>
+          <dd className="tabular-nums">{formatPrice(itemsTotal(quote), currency)}</dd>
+        </div>
+
+        {quote.delivery ? (
+          <div className="flex justify-between gap-4">
+            <dt className="text-ink-subdued">{quote.delivery.title}</dt>
+            <dd className="tabular-nums">
+              {quote.delivery.waived
+                ? "Free"
+                : formatPrice(quote.delivery.amountMinor, currency)}
+            </dd>
+          </div>
+        ) : null}
+
+        <div className="flex justify-between gap-4 border-t border-line pt-2 text-title font-semibold text-ink-strong">
+          <dt>Total</dt>
+          <dd className="tabular-nums">{formatPrice(quote.totalMinor, currency)}</dd>
+        </div>
+      </dl>
+
+      {/* Not a row of its own: the ERP folds tax into every figure above, so a
+          "Tax" line here would read as something still to be added. */}
+      {quote.taxMinor > 0 ? (
+        <Text variant="caption" tone="muted" className="mt-3 tabular-nums">
+          Includes {formatPrice(quote.taxMinor, currency)} tax.
+        </Text>
+      ) : null}
+
+      <Text variant="caption" tone="muted" className="mt-1">
+        Payment is on delivery.
+        {quote.delivery && !quote.delivery.waived && quote.delivery.freeOverMinor
+          ? ` Delivery is free over ${formatPrice(quote.delivery.freeOverMinor, currency)}.`
+          : ""}
+      </Text>
+    </Card>
   );
 }
 
@@ -241,7 +370,7 @@ function Checkout({
 
   return (
     <form
-      className="flex flex-col gap-4 border-t border-neutral-200 pt-8 dark:border-neutral-800"
+      className="mt-10 flex flex-col gap-4 border-t border-line pt-8"
       onSubmit={async (event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
@@ -278,71 +407,97 @@ function Checkout({
         }
       }}
     >
-      <h2 className="text-lg font-medium">Delivery details</h2>
+      <Text as="h2" variant="headlineLarge">
+        Delivery details
+      </Text>
 
-      <Field name="name" label="Your name" required autoComplete="name" />
-      <Field name="phone" label="Phone" required type="tel" autoComplete="tel" />
-      <Field name="address" label="Delivery address" required autoComplete="street-address" />
-      <Field name="landmark" label="Landmark (optional)" />
-      <Field name="note" label="Anything the shop should know (optional)" />
+      <CheckoutField name="name" label="Your name" required autoComplete="name" />
+      <CheckoutField name="phone" label="Phone" required type="tel" autoComplete="tel" />
+      <CheckoutField
+        name="address"
+        label="Delivery address"
+        required
+        autoComplete="street-address"
+      />
+      <CheckoutField
+        name="landmark"
+        label="Landmark"
+        hint="A shop or crossing the rider will know."
+      />
+      <CheckoutField name="note" label="Anything the shop should know" />
 
       <Turnstile onToken={setTurnstileToken} resetSignal={turnstileNonce} />
 
-      {error ? (
-        <p className="rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Notice tone="critical">{error}</Notice> : null}
 
-      <button
+      <Button
         type="submit"
-        disabled={disabled || submitting}
-        className="self-start rounded-md bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+        className="self-start"
+        disabled={disabled}
+        loading={submitting}
       >
         {submitting ? "Placing order…" : "Place order"}
-      </button>
+      </Button>
     </form>
   );
 }
 
-function Field({
+/**
+ * One checkout input.
+ *
+ * A thin wrapper over the design system's [Field] rather than a use of it
+ * directly, because every control here shares the same id-from-name convention
+ * and the same "optional unless marked" rule, and repeating both five times is
+ * how two of them end up disagreeing.
+ *
+ * Validation is the browser's `required` and the ERP's own reply. Nothing is
+ * re-checked in between: a second opinion here would either duplicate the
+ * server's rules or contradict them, and it is the server that decides whether
+ * an order is accepted.
+ */
+function CheckoutField({
   name,
   label,
   required,
   type = "text",
   autoComplete,
+  hint,
 }: {
   name: string;
   label: string;
   required?: boolean;
   type?: string;
   autoComplete?: string;
+  hint?: string;
 }) {
   return (
-    <label className="flex flex-col gap-1.5 text-sm">
-      <span className="text-neutral-700 dark:text-neutral-300">{label}</span>
-      <input
-        name={name}
-        type={type}
-        required={required}
-        autoComplete={autoComplete}
-        className="rounded-md border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900"
-      />
-    </label>
+    <Field id={`checkout-${name}`} label={label} required={required} hint={hint}>
+      {(control) => (
+        <Input
+          {...control}
+          name={name}
+          type={type}
+          required={required}
+          autoComplete={autoComplete}
+        />
+      )}
+    </Field>
   );
 }
 
 function OrderPlaced({ tenant, order }: { tenant: string; order: PlacedOrder }) {
   return (
     <section className="flex flex-col gap-4">
-      <h2 className="text-xl font-medium">Order {order.orderNumber} received</h2>
-      <p className="text-neutral-700 dark:text-neutral-300">
+      <Text as="h2" variant="displayMedium">
+        Order {order.orderNumber} received
+      </Text>
+      <Text variant="bodyLarge" tone="subdued">
         The shop will call you to confirm before delivering. Payment is on delivery.
-      </p>
+      </Text>
       {order.currency ? (
-        <p className="tabular-nums">
+        <Text variant="titleLarge" tone="strong" className="tabular-nums">
           Total: {formatPrice(order.totalMinor, order.currency)}
-        </p>
+        </Text>
       ) : null}
 
       {/*
@@ -351,24 +506,57 @@ function OrderPlaced({ tenant, order }: { tenant: string; order: PlacedOrder }) 
         the token rather than the token. Worth saying so plainly — otherwise
         someone closes the tab and has no way back to their own order.
       */}
-      <div className="rounded-md border border-neutral-200 p-4 text-sm dark:border-neutral-800">
+      <Notice tone="info">
         <p>
           <Link
             href={`/${tenant}/order/${order.statusToken}`}
-            className="font-medium underline underline-offset-4"
+            className="font-semibold underline underline-offset-4"
           >
             Track or cancel this order
           </Link>
         </p>
-        <p className="mt-1 text-neutral-600 dark:text-neutral-400">
+        <p className="mt-1">
           Save this link — it is the only way back to your order, and it is not sent
           anywhere else.
         </p>
-      </div>
+      </Notice>
 
-      <Link href={`/${tenant}`} className="underline underline-offset-4">
-        Keep shopping
-      </Link>
+      <div>
+        <ButtonLink href={`/${tenant}`} variant="secondary">
+          Keep shopping
+        </ButtonLink>
+      </div>
     </section>
   );
+}
+
+/**
+ * The cart line an ERP refusal is about, when it names one.
+ *
+ * The ERP rejects a whole cart over a single line and says which — "'boot-polish'
+ * is no longer available". Rather than parse that sentence, every slug the cart
+ * actually holds is checked against it, so a message this code does not
+ * recognise simply produces no button instead of a wrong one. Nothing depends
+ * on the wording: if the ERP stops naming the slug, the shopper still gets the
+ * message they always got.
+ */
+function slugNamedIn(message: string, lines: CartLine[]): string | null {
+  return lines.find((line) => message.includes(line.slug))?.slug ?? null;
+}
+
+/**
+ * What the goods come to, delivery excluded.
+ *
+ * Not `quote.subtotalMinor`: the ERP prices delivery as a line like any other
+ * and folds it into both the subtotal and the tax. Rendering that figure above
+ * a separate delivery row showed the charge twice, in a column where items plus
+ * delivery did not add up to the total.
+ *
+ * Subtracting one server-authoritative integer from another is not a second
+ * implementation of the pricing rules — both are gross figures, so no tax or
+ * rounding decision is being remade here. The result is exactly the sum of the
+ * line totals listed above it.
+ */
+function itemsTotal(quote: Quote): number {
+  return quote.totalMinor - (quote.delivery?.amountMinor ?? 0);
 }

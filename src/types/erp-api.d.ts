@@ -9934,7 +9934,12 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description Free-text search over item name and code. */
+                    /**
+                     * @description Free-text search. Split on whitespace; every word must appear in at
+                     *     least one of the item's name, code, brand, category, web title or
+                     *     description, so word order does not matter and a category word finds
+                     *     the products in it. At most 8 words are honoured.
+                     */
                     q?: string;
                     /** @description Exact (case-insensitive) match on the item's category name. */
                     category?: string;
@@ -9944,6 +9949,32 @@ export interface paths {
                     page?: number;
                     /** @description Products per page. */
                     limit?: number;
+                    /**
+                     * @description Listing order. `featured` is the merchant's own merchandising weight
+                     *     and stays the default. Every ordering breaks ties on item id, so
+                     *     paging is stable; items with no publish date or no price sort last
+                     *     whichever direction is asked for. An unrecognised value falls back to
+                     *     `featured` rather than erroring, so a stale bookmark still resolves.
+                     */
+                    sort?: "featured" | "newest" | "price_asc" | "price_desc" | "name_asc" | "name_desc";
+                    /**
+                     * @description Inclusive lower bound on `priceMinor`, in the same minor units the
+                     *     products are returned in. Filtered on the same expression the card
+                     *     renders, so nothing can be excluded by a price it does not show.
+                     */
+                    minPrice?: number;
+                    /**
+                     * @description Inclusive upper bound on `priceMinor`. Ignored when it is below
+                     *     `minPrice` - an inverted range means "no upper bound", not "nothing".
+                     */
+                    maxPrice?: number;
+                    /**
+                     * @description Hide what cannot be bought. Excludes items the shop's storefront
+                     *     location holds none of; items that are not stock-tracked, and shops
+                     *     that have named no location, are left visible, because "cannot say"
+                     *     is not the same as zero.
+                     */
+                    inStock?: boolean;
                 };
                 header?: never;
                 path: {
@@ -10783,6 +10814,149 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront-admin/items/bulk-publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish or unpublish many items at once
+         * @description Authenticated, `storefront.write`.
+         *
+         *     Built for catching a catalogue up to the shop after the fact, where
+         *     most items have never had a merchant write a description or pick a
+         *     photo for them - unlike `PUT /storefront-admin/item`, this never
+         *     touches copy, gallery or sort weight, only `isPublished`. A slug is
+         *     still generated for each item published for the first time, since a
+         *     product cannot go live without a URL.
+         *
+         *     Unpublishing an item that was never published is a no-op for that
+         *     item rather than an error. All `itemIds` must belong to the tenant and
+         *     be active, or the whole batch is rejected with a 400 naming none of
+         *     them individually - a stale selection should fail loudly rather than
+         *     silently publish everything else. Implemented in
+         *     `routes/storefront_admin.rs::bulk_publish`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description `items.item_id` values; at most 500 per request. */
+                        itemIds: number[];
+                        isPublished: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description How many records were actually changed. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                updated?: number;
+                            };
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront-admin/items/import-photos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pull each item's existing catalogue photo into its storefront gallery
+         * @description Authenticated, `storefront.write`.
+         *
+         *     Downloads `items.image_path` (an external URL, left over from the
+         *     pre-storefront POS catalogue import) into the tenant's own file
+         *     storage and sets it as that item's gallery - so a merchant who already
+         *     photographed a product for the till does not have to do it again by
+         *     hand for the shop.
+         *
+         *     Only touches items that already have a storefront row with an empty
+         *     gallery; a product with photos already curated is never overwritten.
+         *     Items with no `image_path`, or that do not qualify for any other
+         *     reason, are silently excluded rather than reported as an error - this
+         *     fills in gaps, it does not demand every selected item comply.
+         *
+         *     Best-effort per item: one item's URL timing out or 404ing does not
+         *     fail the batch. Each imported photo is capped at 8 MB and is filed
+         *     under the item's own attachments (same `entity_type` the item form's
+         *     file list reads), so it also shows up there, not only in the shop.
+         *     Implemented in `routes/storefront_admin.rs::import_photos`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description `items.item_id` values; at most 100 per request. */
+                        itemIds: number[];
+                    };
+                };
+            };
+            responses: {
+                /** @description How many photos were imported, skipped, or failed, and why. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                /** @description Items whose photo was downloaded and attached. */
+                                imported?: number;
+                                /** @description Selected items that did not qualify - no `image_path`, no storefront row, or a gallery already set. */
+                                skipped?: number;
+                                /** @description Items that qualified but whose download or storage failed. */
+                                failed?: {
+                                    itemId?: number;
+                                    error?: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -12270,6 +12444,13 @@ export interface components {
         StorefrontQuoteLine: {
             slug: string;
             title: string;
+            /**
+             * @description Media path for the product's first gallery photograph, or null when
+             *     it has none. Only the first: a cart row shows one thumbnail, and the
+             *     whole gallery would be unused bytes in every quote. The delivery
+             *     line, being a charge rather than a thing on a shelf, always has null.
+             */
+            image?: string | null;
             quantity: number;
             /**
              * Format: int64

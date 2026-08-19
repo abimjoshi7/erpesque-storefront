@@ -44,3 +44,37 @@ export function priceAsNumber(
   const decimals = currency.decimalPlaces ?? 2;
   return (minor / 10 ** decimals).toFixed(decimals);
 }
+
+/**
+ * A shopper-typed amount as integer minor units.
+ *
+ * The price filter is the one place a *person* states money to this app, and
+ * they state it the way it is printed — "620", not 62000. Everything past this
+ * function is minor units again, so the ERP is never handed a major figure and
+ * no comparison is ever made across the two scales.
+ *
+ * `Math.round` after scaling, not before: "6.005" at two decimals is 601 minor,
+ * and truncating would quietly move the shopper's bound by a paisa.
+ */
+export function majorToMinor(
+  major: number,
+  currency: Currency,
+): number {
+  const decimals = currency.decimalPlaces ?? 2;
+  return Math.round(major * 10 ** decimals);
+}
+
+/**
+ * Reads a price a shopper typed, or that arrived in a URL.
+ *
+ * Returns `undefined` for anything that is not a positive finite number, so a
+ * hand-edited `?minPrice=abc` widens to the whole shop rather than narrowing to
+ * nothing. Capped well above any plausible shelf price to keep an absurd bound
+ * out of the query string and out of the canonical link.
+ */
+export function parseMajorAmount(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value.trim());
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1e12) return undefined;
+  return parsed;
+}

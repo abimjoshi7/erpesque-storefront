@@ -27,12 +27,50 @@ export type Catalog = {
   totalPages: number;
 };
 
+/**
+ * The orderings the ERP catalog accepts, in the order a sort menu should list
+ * them. `featured` is the merchant's own merchandising weight and the default.
+ */
+export const CATALOG_SORTS = [
+  "featured",
+  "newest",
+  "price_asc",
+  "price_desc",
+  "name_asc",
+  "name_desc",
+] as const;
+
+export type CatalogSort = (typeof CATALOG_SORTS)[number];
+
+/**
+ * Narrows whatever arrived in the URL to a sort the ERP knows.
+ *
+ * A bad value is dropped rather than passed through: the ERP would fall back to
+ * `featured` anyway, and letting the raw string reach the query string would
+ * put an un-normalised URL in the canonical link.
+ */
+export function parseSort(value: string | undefined): CatalogSort | undefined {
+  return CATALOG_SORTS.includes(value as CatalogSort)
+    ? (value as CatalogSort)
+    : undefined;
+}
+
 export type CatalogQuery = {
   q?: string;
   category?: string;
   brand?: string;
   page?: number;
   limit?: number;
+  sort?: CatalogSort;
+  /**
+   * Inclusive bounds in minor units, matching `priceMinor` on the product. The
+   * conversion from what a shopper typed happens in `money.majorToMinor`, so
+   * nothing below this line ever sees a major-unit figure.
+   */
+  minPrice?: number;
+  maxPrice?: number;
+  /** Hide what the shop holds none of. Non-stock-tracked items stay visible. */
+  inStock?: boolean;
 };
 
 export type Facet = components["schemas"]["StorefrontFacet"];
@@ -166,6 +204,13 @@ export async function fetchCatalog(
   if (query.brand) search.set("brand", query.brand);
   if (query.page && query.page > 1) search.set("page", String(query.page));
   if (query.limit) search.set("limit", String(query.limit));
+  // `featured` is the ERP's own default, so it is left out of the query string
+  // rather than spelled out — one listing, one URL, and the canonical link for
+  // an unsorted shop stays the bare one.
+  if (query.sort && query.sort !== "featured") search.set("sort", query.sort);
+  if (query.minPrice) search.set("minPrice", String(query.minPrice));
+  if (query.maxPrice) search.set("maxPrice", String(query.maxPrice));
+  if (query.inStock) search.set("inStock", "true");
 
   return get<Catalog>(`/storefront/${encodeURIComponent(tenantCode)}/catalog`, search);
 }
@@ -189,6 +234,20 @@ export async function fetchFacets(tenantCode: string): Promise<Facets | null> {
 
   const body = (await response.json()) as { data: Facets };
   return body.data;
+}
+
+/**
+ * The shop itself, for chrome that every page under `/{tenant}` carries.
+ *
+ * Served by the facets endpoint rather than the catalog: both return the
+ * tenant, but facets is the cheaper read and is already cached for an hour, so
+ * a header does not put a catalog query behind every product page. Next dedupes
+ * the two calls when a page asks for facets as well, so the listing pays for
+ * one request, not two.
+ */
+export async function fetchShop(tenantCode: string): Promise<Tenant | null> {
+  const facets = await fetchFacets(tenantCode);
+  return facets?.tenant ?? null;
 }
 
 /**

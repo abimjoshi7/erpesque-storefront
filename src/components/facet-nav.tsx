@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { Text } from "@/design-system";
+import { listingHref, withFilters, type ListingFilters } from "@/lib/catalog-url";
 import type { Facet } from "@/lib/erp";
 
 /**
@@ -21,7 +23,7 @@ export function FacetNav({
 }: {
   tenant: string;
   facets: { categories: Facet[]; brands: Facet[] };
-  current: { q?: string; category?: string; brand?: string };
+  current: ListingFilters;
 }) {
   if (facets.categories.length === 0 && facets.brands.length === 0) return null;
 
@@ -56,7 +58,7 @@ function FacetGroup({
   tenant: string;
   param: "category" | "brand";
   facets: Facet[];
-  current: { q?: string; category?: string; brand?: string };
+  current: ListingFilters;
 }) {
   if (facets.length === 0) return null;
 
@@ -64,15 +66,15 @@ function FacetGroup({
 
   return (
     <div>
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+      <Text as="h2" variant="labelSmall" tone="muted" className="uppercase">
         {heading}
-      </h2>
+      </Text>
       <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 lg:flex-col lg:gap-x-0">
         {selected ? (
           <li>
             <Link
-              href={facetHref(tenant, { ...current, [param]: undefined })}
-              className="text-sm text-neutral-500 underline underline-offset-4"
+              href={listingHref(tenant, withFilters(current, { [param]: undefined }))}
+              className="text-body-sm text-ink-muted underline underline-offset-4"
             >
               All {heading.toLowerCase()}
             </Link>
@@ -83,16 +85,16 @@ function FacetGroup({
           return (
             <li key={facet.value}>
               <Link
-                href={facetHref(tenant, { ...current, [param]: facet.value })}
+                href={listingHref(tenant, withFilters(current, { [param]: facet.value }))}
                 aria-current={isSelected ? "true" : undefined}
                 className={
                   isSelected
-                    ? "text-sm font-medium"
-                    : "text-sm text-neutral-600 hover:underline hover:underline-offset-4 dark:text-neutral-400"
+                    ? "text-body-sm font-semibold text-ink-strong"
+                    : "text-body-sm text-ink-subdued hover:underline hover:underline-offset-4"
                 }
               >
                 {facet.value}{" "}
-                <span className="text-neutral-400 tabular-nums">{facet.productCount}</span>
+                <span className="text-ink-disabled tabular-nums">{facet.productCount}</span>
               </Link>
             </li>
           );
@@ -100,23 +102,4 @@ function FacetGroup({
       </ul>
     </div>
   );
-}
-
-/**
- * Builds a listing URL, carrying the filters that are not being changed.
- *
- * The search term survives a category click on purpose: a shopper who searched
- * and then narrowed by category means both, and dropping one silently would
- * show them results they did not ask for.
- */
-function facetHref(
-  tenant: string,
-  filters: { q?: string; category?: string; brand?: string },
-): string {
-  const search = new URLSearchParams();
-  if (filters.q) search.set("q", filters.q);
-  if (filters.category) search.set("category", filters.category);
-  if (filters.brand) search.set("brand", filters.brand);
-  const query = search.toString();
-  return query ? `/${tenant}?${query}` : `/${tenant}`;
 }

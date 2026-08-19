@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button, Notice, Text } from "@/design-system";
+
 /**
  * Cancels the order this page is showing.
  *
@@ -46,41 +48,37 @@ export function CancelOrder({ tenant, token }: { tenant: string; token: string }
   }
 
   return (
-    <div className="mt-8 border-t border-neutral-200 pt-6 dark:border-neutral-800">
+    <div className="mt-8 border-t border-line pt-6">
       {error ? (
-        <p className="mb-4 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+        <Notice tone="critical" className="mb-4">
           {error}
-        </p>
+        </Notice>
       ) : null}
 
       {confirming ? (
         <div className="flex flex-wrap items-center gap-3">
-          <p className="text-sm">Cancel this order? This cannot be undone.</p>
-          <button
-            type="button"
+          <Text variant="bodySmall">Cancel this order? This cannot be undone.</Text>
+          <Button
+            variant="destructive"
+            size="sm"
             onClick={cancel}
-            disabled={submitting}
-            className="rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            loading={submitting}
           >
             {submitting ? "Cancelling…" : "Yes, cancel it"}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="tertiary"
+            size="sm"
             onClick={() => setConfirming(false)}
             disabled={submitting}
-            className="text-sm underline underline-offset-4"
           >
             Keep the order
-          </button>
+          </Button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          className="text-sm text-neutral-600 underline underline-offset-4 dark:text-neutral-400"
-        >
+        <Button variant="tertiary" size="sm" onClick={() => setConfirming(true)}>
           Cancel this order
-        </button>
+        </Button>
       )}
     </div>
   );

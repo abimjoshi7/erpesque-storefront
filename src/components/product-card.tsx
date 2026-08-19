@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AvailabilityBadge } from "@/components/availability-badge";
 import { ImagePlaceholder } from "@/components/image-placeholder";
+import { Text } from "@/design-system";
 import type { Product, Tenant } from "@/lib/erp";
 import { primaryImage } from "@/lib/media";
 import { formatPrice } from "@/lib/money";
@@ -34,9 +35,9 @@ export function ProductCard({
   return (
     <Link
       href={`/${tenant}/product/${product.slug}`}
-      className="flex h-full flex-col rounded-lg border border-neutral-200 p-5 transition-colors hover:border-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:border-neutral-800 dark:hover:border-neutral-600"
+      className="flex h-full flex-col rounded-lg border border-line bg-surface p-5 shadow-xs transition-[border-color,box-shadow] duration-(--duration-fast) ease-standard hover:border-line-strong hover:shadow-md"
     >
-      <div className="mb-4 flex aspect-square items-center justify-center overflow-hidden rounded-md bg-neutral-100 dark:bg-neutral-900">
+      <div className="mb-4 flex aspect-square items-center justify-center overflow-hidden rounded-md bg-surface-subdued">
         {image ? (
           // eslint-disable-next-line @next/next/no-img-element -- deliberate; see the note above.
           <img
@@ -55,15 +56,19 @@ export function ProductCard({
 
       <div className="flex-1">
         {product.category ? (
-          <p className="text-xs uppercase tracking-wide text-neutral-500">
+          <Text variant="labelSmall" tone="muted" className="uppercase">
             {product.category}
-          </p>
+          </Text>
         ) : null}
-        <h2 className="mt-1 font-medium">{product.title}</h2>
+        <Text as="h2" variant="headlineSmall" className="mt-1">
+          {product.title}
+        </Text>
       </div>
 
       <div className="mt-4 flex items-baseline justify-between gap-3">
-        <p className="tabular-nums">{formatPrice(product.priceMinor, currency)}</p>
+        <Text variant="titleLarge" tone="strong" className="tabular-nums">
+          {formatPrice(product.priceMinor, currency)}
+        </Text>
         <AvailabilityBadge availability={product.availability} />
       </div>
     </Link>
