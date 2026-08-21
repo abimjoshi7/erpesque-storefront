@@ -83,9 +83,14 @@ app has to keep are short.
 A shopper signs in with a phone number and a one-time code. The ERP mints an
 opaque session token and keeps only its SHA-256; the token itself lives in an
 httpOnly, `SameSite=Lax` cookie scoped to `/{tenant}`, and travels to the ERP in
-`X-Storefront-Session` — never `Authorization`, which belongs to staff bearer
-tokens. `src/lib/session.ts` is the only place the cookie's attributes are
+`X-Shopper-Session` — never `Authorization`, which the edge gate reserves for
+staff JWTs. `src/lib/session.ts` is the only place the cookie's attributes are
 decided, and `/api/{tenant}/auth/verify-code` is the only place it is written.
+
+There is no challenge handle between the two steps. The ERP keeps one live code
+per phone number, so step two submits the number again alongside the digits —
+which is also what lets the send throttle count, since a resend updates that one
+row instead of creating a rival.
 
 Three rules go with it:
 
@@ -122,19 +127,22 @@ Every public `/storefront/*` endpoint the ERP exposes is consumed here:
 | `GET /order/{token}` | `/{tenant}/order/{token}` |
 | `POST /order/{token}/cancel` | Self-cancel while the order is still a draft |
 | `POST /auth/request-code` | `/{tenant}/sign-in`, step one |
-| `POST /auth/verify-code` | `/{tenant}/sign-in`, step two — the only place the cookie is written |
+| `POST /auth/verify` | `/{tenant}/sign-in`, step two — the only place the cookie is written |
 | `POST /auth/logout` | Sign out, which revokes at the ERP before clearing the cookie |
-| `GET /me` | The header's account slot, via `/api/{tenant}/me` |
-| `GET /orders` | `/{tenant}/account` — order history |
-| `GET /orders/{orderNumber}` | `/{tenant}/account/orders/{orderNumber}` |
+| `GET /auth/session` | The header's account slot, via `/api/{tenant}/me` |
+| `GET /account/orders` | `/{tenant}/account` — order history |
+| `GET /account/orders/{orderNumber}` | `/{tenant}/account/orders/{orderNumber}` |
 
 Orders land in the ERP as draft sales orders awaiting staff approval; payment is
 on delivery.
 
-The six buyer-login endpoints are consumed here but are still being written on
-the ERP side, so their request and response shapes are hand-typed in
-`src/lib/erp.ts` rather than generated. `npm run types:check` is what will notice
-once the OpenAPI document catches up.
+The six buyer-login endpoints landed on the ERP's `feat/storefront` branch, so
+their shapes come from the generated types like everything else. Point
+`ERP_OPENAPI` at that checkout until it merges:
+
+```bash
+ERP_OPENAPI=../erp-server/server/openapi.yaml npm run types:generate
+```
 
 The shop's chrome — name, search box, cart count, footer — lives in
 `src/app/[tenant]/layout.tsx`, which is also where the shop-exists check

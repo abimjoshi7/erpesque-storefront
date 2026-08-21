@@ -9,18 +9,20 @@ import { Button, Field, Input, Notice, Text } from "@/design-system";
 /**
  * Two steps: a phone number, then the code sent to it.
  *
- * The step is local state rather than a URL segment because the challenge id
- * only exists in this component's lifetime — a shopper who reloads has to ask
- * for a new code anyway, and a URL that looked resumable but was not would be
- * worse than one that plainly is not.
+ * The step is local state rather than a URL segment because a reload has to
+ * start over anyway — the code is verified against the number, and a URL that
+ * looked resumable but was not would be worse than one that plainly is not.
+ *
+ * There is no challenge handle to carry: the ERP keeps one live code per phone
+ * number, so the number the shopper typed is what step two submits alongside
+ * the digits. That is also what makes the send throttle countable, since a
+ * resend updates the same row rather than creating a rival one.
  *
  * Nothing here reveals whether the number is known to the shop. The server
  * answers a stranger and a regular identically, and this form moves to the code
  * step either way.
  */
-type Step =
-  | { name: "phone" }
-  | { name: "code"; challengeId: string; phone: string; resendAt: number };
+type Step = { name: "phone" } | { name: "code"; phone: string; resendAt: number };
 
 export function SignInForm({ tenant }: { tenant: string }) {
   const router = useRouter();
@@ -69,7 +71,7 @@ export function SignInForm({ tenant }: { tenant: string }) {
         body: JSON.stringify({ phone, turnstileToken }),
       });
       const body = (await response.json()) as {
-        data?: { challengeId: string; resendAfterSeconds: number };
+        data?: { resendAfterSeconds: number };
         error?: string;
       };
       if (!response.ok || !body.data) {
@@ -78,7 +80,6 @@ export function SignInForm({ tenant }: { tenant: string }) {
       }
       setStep({
         name: "code",
-        challengeId: body.data.challengeId,
         phone,
         resendAt: Date.now() + body.data.resendAfterSeconds * 1000,
       });
@@ -101,7 +102,7 @@ export function SignInForm({ tenant }: { tenant: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          challengeId: step.challengeId,
+          phone: step.phone,
           code,
           name: name || undefined,
         }),
@@ -168,12 +169,13 @@ export function SignInForm({ tenant }: { tenant: string }) {
             We sent a code to {step.phone}.
           </Text>
 
-          <Field id="sign-in-code" label="The code" required>
+          <Field id="sign-in-code" label="The six-digit code" required>
             {(control) => (
               <Input
                 {...control}
                 inputMode="numeric"
                 autoComplete="one-time-code"
+                maxLength={6}
                 autoFocus
                 value={code}
                 onChange={(event) => setCode(event.target.value)}

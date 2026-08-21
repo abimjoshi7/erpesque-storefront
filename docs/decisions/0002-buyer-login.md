@@ -368,3 +368,59 @@ that was never built. Phase 0 does not need a provider, because an unconfigured
 sender logs the code at debug level and the flow remains testable, but Phase 1
 cannot reach real buyers without one, and free tiers for delivery into this market
 are thin enough that the choice deserves its own decision rather than a default.
+
+## Addendum — what shipped, 2026-08-21
+
+Phases 0 and 1 are built on the ERP's `feat/storefront` branch (migrations 125
+to 128, `routes/storefront_auth.rs`), and the storefront now talks to them. Six
+details differ from what this document assumed, and the document is wrong rather
+than the code.
+
+**The header is `X-Shopper-Session`.** Not `X-Storefront-Session`. The reasoning
+is unchanged — a named header, never `Authorization`, which the edge gate
+reserves for staff JWTs — but the name sits beside the `X-Shopper-IP` that
+already travels the same path, and one vocabulary is worth more than either name.
+
+**The open question about the Worker is closed, and the answer is yes.** It
+builds its upstream request as `new Headers(request.headers)` and deletes only
+`host`, so an unrecognised header is forwarded verbatim
+(`workers/erpesque-api/src/index.js`). Nothing had to move into a request body.
+`request-code` was additionally moved into the strict order-class rate bucket,
+because every accepted request spends the merchant's money on a message.
+
+**There is no challenge id.** The ERP keeps one live challenge per tenant and
+phone, updated in place, so the phone number is the handle: step two of the form
+submits the number again with the digits. That is not an omission — a challenge
+row that a resend replaced would reset the send counters, and a counter a resend
+resets is not a counter.
+
+**The paths are `/auth/request-code`, `/auth/verify`, `/auth/session`,
+`/auth/logout`, `/account/orders` and `/account/orders/{orderNumber}`.** The
+account reads sit under `/account/` rather than at the top level, which keeps
+the endpoints that require a session visibly apart from the public catalog ones.
+
+**History is claimed at sign-in, not joined at read time.** This document
+proposed scoping the history query to the session's account *or* to the customer
+ids of that account's members. What shipped instead is an `UPDATE` inside
+verification: orders on that customer with `storefront_account_id IS NULL` are
+adopted into the account. The property it protects is the one this document
+cared about — a year of guest orders appears with no backfill — and the proof
+still runs the right way round, because a guest order records a phone number
+that was typed while a session records one a code was received on. The `OR`
+clause would have kept the read honest without ever writing; the `UPDATE` makes
+every later read simple at the cost of touching rows once. Only unclaimed rows
+are touched, so nothing can move between accounts. Note that this is the one
+place the "every change here is additive, no existing row rewritten" claim above
+no longer holds.
+
+**Phase 2 arrived early, in part.** `place_order` stamps `storefront_account_id`
+when a session is presented, and an expired session is never a reason a checkout
+fails. Contact prefill is still to come.
+
+Two things this document said are still true and still blocking. No SMS provider
+is chosen: `SmsClient` is `None` unless `SMS_PROVIDER` is set, a `log` provider
+exists for local work, and `request-code` answers 503 rather than reporting a
+send that never happened — which is the right failure, but it is still a shop
+that cannot sign anyone in. And the sliding window shipped at 30 days idle under
+a 90-day cap, against the 14 days this app's cookie assumes; the cookie expiring
+first is the harmless direction, but they should be made to agree.

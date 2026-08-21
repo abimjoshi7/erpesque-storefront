@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { errorResponse } from "@/lib/cart-request";
+import { authErrorResponse } from "@/lib/cart-request";
 import { shopperIp } from "@/lib/client-ip";
 import { verifyLoginCode } from "@/lib/erp";
 import { forbiddenResponse, isSameOrigin } from "@/lib/same-origin";
@@ -15,6 +15,10 @@ import { setSession } from "@/lib/session";
  * keeping it to one place means the cookie's attributes are decided once, in
  * `lib/session`.
  *
+ * Keyed by the phone number rather than by a challenge id, because the ERP
+ * keeps exactly one live code per number. There is no handle for this form to
+ * hold, which is also what makes the send throttle countable.
+ *
  * The token the ERP returns here is its only copy; the ERP keeps a digest. It
  * goes straight into an httpOnly cookie and is never included in the response
  * body, so it does not reach any script on the page.
@@ -27,22 +31,22 @@ export async function POST(
 
   const { tenant } = await params;
 
-  let challengeId: string;
+  let phone: string;
   let code: string;
   let name: string | undefined;
   try {
     const body = (await request.json()) as {
-      challengeId?: unknown;
+      phone?: unknown;
       code?: unknown;
       name?: unknown;
     };
-    if (typeof body.challengeId !== "string" || !body.challengeId) {
+    if (typeof body.phone !== "string" || !body.phone.trim()) {
       return NextResponse.json({ error: "Start again from your phone number." }, { status: 400 });
     }
     if (typeof body.code !== "string" || !body.code.trim()) {
       return NextResponse.json({ error: "Enter the code you were sent." }, { status: 400 });
     }
-    challengeId = body.challengeId;
+    phone = body.phone.trim();
     code = body.code.trim();
     name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : undefined;
   } catch {
@@ -50,23 +54,23 @@ export async function POST(
   }
 
   try {
-    const result = await verifyLoginCode(
-      tenant,
-      { challengeId, code, name },
-      shopperIp(request),
-    );
+    const result = await verifyLoginCode(tenant, { phone, code, name }, shopperIp(request));
     if (!result) {
       return NextResponse.json({ error: "This shop is not available." }, { status: 404 });
     }
 
-    await setSession(tenant, result.sessionToken);
+    await setSession(tenant, result.token);
 
     // Everything except the token. The page needs to know who signed in; the
     // browser has no use for the credential and every reason not to hold it.
     return NextResponse.json({
-      data: { buyer: result.buyer, account: result.account, expiresAt: result.expiresAt },
+      data: {
+        shopper: result.shopper,
+        accounts: result.accounts,
+        expiresAt: result.expiresAt,
+      },
     });
   } catch (error) {
-    return errorResponse(error);
+    return authErrorResponse(error);
   }
 }

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { fetchMe, isUnauthorized } from "@/lib/erp";
+import { fetchShopperSession, isUnauthorized } from "@/lib/erp";
 import { clearSession, readSession } from "@/lib/session";
 
 /**
  * Who is signed in, for the account slot in the shop header.
+ *
+ * Reads the ERP's `/auth/session`, which also slides the session's idle window
+ * forward — so a shopper who only ever browses the catalog stays signed in.
  *
  * This exists so the header can be a client island. Reading the cookie in the
  * shop layout instead would opt every page beneath `/{tenant}` into per-request
@@ -24,8 +27,8 @@ export async function GET(
   if (!session) return NextResponse.json({ data: null });
 
   try {
-    const me = await fetchMe(tenant, session);
-    return NextResponse.json({ data: me ?? null });
+    const shopper = await fetchShopperSession(tenant, session);
+    return NextResponse.json({ data: shopper ?? null });
   } catch (error) {
     if (isUnauthorized(error)) {
       // The session expired or was revoked. Drop the cookie so the browser

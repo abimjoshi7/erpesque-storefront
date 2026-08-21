@@ -49,8 +49,6 @@ export default async function AccountPage({
 
   if (!history) redirect(`/${tenant}/sign-in`);
 
-  const currency = history.tenant.currency;
-
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
@@ -68,33 +66,52 @@ export default async function AccountPage({
         />
       ) : (
         <ul className="mt-8 flex flex-col gap-3">
-          {history.orders.map((order) => {
+          {history.orders.map((order, index) => {
             const copy = statusCopy(order.status);
+            // Each row carries its own currency rather than borrowing the
+            // tenant's, so a total always renders in the money the order was
+            // actually written in.
+            const total = order.currency
+              ? formatPrice(order.totalMinor, order.currency)
+              : null;
+            const body = (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Text variant="titleSmall" className="font-semibold">
+                    {order.orderNumber ?? "Order"}
+                  </Text>
+                  <StatusPill tone={copy.tone}>{copy.label}</StatusPill>
+                </div>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <Text variant="bodySmall" tone="muted">
+                    {order.orderDate ? formatOrderDate(order.orderDate) : null}
+                    {order.lineCount
+                      ? ` · ${order.lineCount} item${order.lineCount === 1 ? "" : "s"}`
+                      : null}
+                  </Text>
+                  <Text variant="bodySmall" className="tabular-nums font-semibold">
+                    {total}
+                  </Text>
+                </div>
+              </>
+            );
+
             return (
-              <li key={order.orderNumber}>
+              <li key={order.orderNumber ?? `row-${index}`}>
                 <Card padding={false}>
-                  <Link
-                    href={`/${tenant}/account/orders/${encodeURIComponent(order.orderNumber)}`}
-                    className="flex flex-col gap-2 rounded-lg p-4 transition-colors hover:bg-surface-subdued"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <Text variant="titleSmall" className="font-semibold">
-                        {order.orderNumber}
-                      </Text>
-                      <StatusPill tone={copy.tone}>{copy.label}</StatusPill>
-                    </div>
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <Text variant="bodySmall" tone="muted">
-                        {order.orderDate ? formatOrderDate(order.orderDate) : null}
-                        {order.lineCount
-                          ? ` · ${order.lineCount} item${order.lineCount === 1 ? "" : "s"}`
-                          : null}
-                      </Text>
-                      <Text variant="bodySmall" className="tabular-nums font-semibold">
-                        {currency ? formatPrice(order.totalMinor, currency) : null}
-                      </Text>
-                    </div>
-                  </Link>
+                  {/* The number is what opens the order, so a row without one
+                      is shown and not linked rather than hidden — the shopper
+                      still spent that money. */}
+                  {order.orderNumber ? (
+                    <Link
+                      href={`/${tenant}/account/orders/${encodeURIComponent(order.orderNumber)}`}
+                      className="flex flex-col gap-2 rounded-lg p-4 transition-colors hover:bg-surface-subdued"
+                    >
+                      {body}
+                    </Link>
+                  ) : (
+                    <div className="flex flex-col gap-2 p-4">{body}</div>
+                  )}
                 </Card>
               </li>
             );

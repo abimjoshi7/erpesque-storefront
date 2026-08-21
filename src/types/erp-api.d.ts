@@ -10580,6 +10580,499 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/{tenantCode}/auth/request-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a shopper a one-time sign-in code
+         * @description Unauthenticated. Writes or updates the single live challenge for this
+         *     number and sends the code by SMS.
+         *
+         *     The response is identical whether or not the shop has ever seen the
+         *     number. It has to be - a differing reply would make this a way to ask
+         *     "does this person shop here", which is the customer list the module
+         *     spends its effort not leaking.
+         *
+         *     Throttled on the canonical phone, not on the caller's address: every
+         *     shopper reaches this API through the storefront's server, so the only
+         *     IP the edge sees is that server's, and the phone number is what costs
+         *     money to send to. One live challenge exists per number and a resend
+         *     updates it in place, so the send counters survive the resend - a
+         *     counter a new row would reset is not a counter.
+         *
+         *     Returns 503 when the shop has no SMS provider configured, rather than
+         *     reporting a send that never happened. Implemented in
+         *     `routes/storefront_auth.rs::request_code`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description As the shopper typed it. Identity is the trailing ten
+                         *     digits, so "+977 9841112233" and "9841112233" are one
+                         *     person and hold one challenge between them.
+                         */
+                        phone: string;
+                        /**
+                         * @description Cloudflare Turnstile token from the sign-in form. Checked
+                         *     only where `TURNSTILE_SECRET_KEY` is set, and after the
+                         *     phone number has been validated - the token is single-use,
+                         *     so challenging first would make a retry fail on a replay.
+                         */
+                        turnstileToken?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /**
+                 * @description A code was sent. Says nothing about whether the number is known to
+                 *     the shop.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                sent: boolean;
+                                /** @description How long the code stays valid. */
+                                expiresInSeconds: number;
+                                /**
+                                 * @description Seconds until another code may be requested for
+                                 *     this number. Escalates with each send in the hour:
+                                 *     60, 120, 300, then 900.
+                                 */
+                                resendAfterSeconds: number;
+                            };
+                        };
+                    };
+                };
+                /**
+                 * @description The number looks wrong, or a code was sent too recently, or the
+                 *     hourly cap for this number is used up. The message names which.
+                 */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Turnstile could not confirm a person submitted the form. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+                /**
+                 * @description The shop has no SMS provider configured, or the provider would not
+                 *     take the message. Nothing was sent.
+                 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/auth/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem a code for a buyer session
+         * @description Unauthenticated. Turns a correct code into a session, creating the
+         *     shopper's `storefront_customers` row and a personal
+         *     `storefront_accounts` row the first time.
+         *
+         *     Every failure - no challenge, expired, already used, wrong digits -
+         *     answers 401 with the same sentence, because distinguishing them would
+         *     say which numbers have a code outstanding. Five wrong guesses kill the
+         *     code; the count is committed even on a failed attempt, or every guess
+         *     would be free.
+         *
+         *     Signing in adopts the shopper's earlier guest orders into their
+         *     account, so a year of checking out as a guest does not present as an
+         *     empty history. The proof runs the right way round: a guest order
+         *     records a phone number that was merely typed, a session records one a
+         *     code was received on.
+         *
+         *     `token` in the response is the only copy - the database keeps a
+         *     SHA-256. The storefront's server holds it and presents it as
+         *     `X-Shopper-Session`; it is not a cookie, because a shopper's browser
+         *     never talks to this API. Implemented in
+         *     `routes/storefront_auth.rs::verify_code`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        phone: string;
+                        /**
+                         * @description Six digits. Punctuation and spaces are stripped, so a code
+                         *     pasted with its surrounding text still works.
+                         */
+                        code: string;
+                        /**
+                         * @description What to call this shopper, for a form that is also a
+                         *     sign-up form. Omitted by returning shoppers, and never
+                         *     allowed to erase the name their last order recorded.
+                         */
+                        name?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Signed in. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["StorefrontShopperSession"] & {
+                                /**
+                                 * @description 64 hex characters, the only copy. Present it as
+                                 *     `X-Shopper-Session` on the account endpoints.
+                                 */
+                                token: string;
+                                /**
+                                 * Format: date-time
+                                 * @description End of the idle window, extended on every
+                                 *     authenticated request.
+                                 */
+                                expiresAt: string;
+                                /**
+                                 * Format: date-time
+                                 * @description Hard cap, set once and never extended. Without it
+                                 *     the sliding window renews forever and a stolen
+                                 *     token is good indefinitely.
+                                 */
+                                absoluteExpiresAt: string;
+                            };
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                /**
+                 * @description The code is wrong, expired, already used, or has been guessed at
+                 *     too many times. One message covers all four on purpose.
+                 */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who is signed in
+         * @description Requires a buyer session. Reading it slides the idle window forward, so
+         *     an active shopper is not signed out mid-visit.
+         *
+         *     401 rather than 404 when there is no session: the tenant has already
+         *     resolved by this point, so the shop demonstrably exists, and telling a
+         *     signed-out shopper their shop had vanished only confuses them.
+         *     Implemented in `routes/storefront_auth.rs::session`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The signed-in shopper. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["StorefrontShopperSession"];
+                        };
+                    };
+                };
+                /** @description No session, or it has expired. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a buyer session
+         * @description Deletes the session row rather than marking it, because a session is
+         *     only ever read by one query and an expired row has no further use -
+         *     keeping it would build a log of a shopper's visits nobody asked for.
+         *
+         *     Signing out of a session that has already lapsed succeeds: the shopper
+         *     wanted to be signed out, and they are. Implemented in
+         *     `routes/storefront_auth.rs::logout`.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /**
+                     * @description End every session this shopper holds, not only the one presenting the
+                     *     header. What "I lost my phone" needs.
+                     */
+                    everywhere?: boolean;
+                };
+                header?: never;
+                path: {
+                    tenantCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Signed out. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                signedOut: boolean;
+                            };
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/account/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A signed-in shopper's order history
+         * @description Requires a buyer session. Scoped by the session's account and by
+         *     nothing in the request - there is no parameter naming whose orders to
+         *     return, so there is nothing to tamper with.
+         *
+         *     Statuses use the same two functions the order page does, so a list row
+         *     and the page it opens cannot drift apart. Implemented in
+         *     `routes/storefront_auth.rs::order_list`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 1-based. */
+                    page?: number;
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    tenantCode: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description A page of the account's orders, newest first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                tenant: components["schemas"]["StorefrontTenant"];
+                                page: number;
+                                pageSize: number;
+                                total: number;
+                                totalPages: number;
+                                orders: components["schemas"]["StorefrontOrderSummary"][];
+                            };
+                        };
+                    };
+                };
+                /** @description No session, or it has expired. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/{tenantCode}/account/orders/{orderNumber}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One of the account's orders
+         * @description Requires a buyer session. The order number is not the authorisation -
+         *     the session's account is, and it travels inside the lookup rather than
+         *     being checked afterwards. A number belonging to someone else simply
+         *     does not match, so it is indistinguishable from one that does not
+         *     exist and this endpoint cannot be walked to enumerate a shop's orders.
+         *
+         *     Returns the same shape as the status-token page, rendered by the same
+         *     code. Implemented in `routes/storefront_auth.rs::order_detail`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantCode: string;
+                    /** @description `sales_orders.order_number`, as shown in the history. */
+                    orderNumber: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The order as its own shopper may see it. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["StorefrontOrderStatus"];
+                        };
+                    };
+                };
+                /** @description No session, or it has expired. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                429: components["responses"]["TooManyRequests"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront-admin/settings": {
         parameters: {
             query?: never;
@@ -12593,6 +13086,65 @@ export interface components {
              * Format: int64
              * @description Summed from the order lines, delivery included.
              */
+            totalMinor: number;
+            currency: components["schemas"]["StorefrontCurrency"];
+        };
+        /**
+         * @description Who is signed in, as the storefront renders them.
+         *
+         *     Accounts are named, never numbered. Nothing here can be fed back as a
+         *     selector, which is the same rule that keeps orders unaddressable by id
+         *     on this surface; an account switcher will need a handle, and that handle
+         *     should be a token this API mints rather than a primary key that also
+         *     addresses rows in the ERP.
+         */
+        StorefrontShopperSession: {
+            tenant: components["schemas"]["StorefrontTenant"];
+            shopper: {
+                /**
+                 * @description Null until the shopper has given one, at sign-in or on an
+                 *     order. Signing in never erases a name an order already
+                 *     recorded.
+                 */
+                name?: string | null;
+                phone: string;
+            };
+            /**
+             * @description Every account this shopper may act for. One personal account is
+             *     created at first sign-in; a business gains members through the ERP,
+             *     so a list longer than one is staff's doing.
+             */
+            accounts: {
+                name?: string | null;
+                /**
+                 * @description Free text, `owner` for now. Deliberately unconstrained so a
+                 *     buyer, an approver or a view-only clerk can be named later
+                 *     without a migration.
+                 */
+                role: string;
+                /** @description The account this session is acting for. */
+                current: boolean;
+            }[];
+        };
+        /**
+         * @description One row of a signed-in shopper's order history. The fields a list does
+         *     not need - the address, the note, the lines - are not fetched at all, so
+         *     the query stays two round trips however long the history is.
+         *
+         *     `status` and `cancellable` are produced by the same two functions
+         *     `StorefrontOrderStatus` uses, so the word a list shows and the word its
+         *     own page shows cannot disagree.
+         */
+        StorefrontOrderSummary: {
+            orderNumber?: string | null;
+            /** Format: date-time */
+            orderDate?: string | null;
+            /** @enum {string} */
+            status: "pending" | "confirmed" | "partially_sent" | "delivered" | "cancelled";
+            cancellable: boolean;
+            /** @description How many lines the order has, delivery included. */
+            lineCount: number;
+            /** Format: int64 */
             totalMinor: number;
             currency: components["schemas"]["StorefrontCurrency"];
         };

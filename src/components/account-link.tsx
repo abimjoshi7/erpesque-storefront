@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import type { Me } from "@/lib/erp";
+import type { ShopperSession } from "@/lib/erp";
 
 /**
  * "Sign in", or the buyer's name once they are.
@@ -20,33 +20,33 @@ import type { Me } from "@/lib/erp";
  * different words on every navigation.
  */
 export function AccountLink({ tenant }: { tenant: string }) {
-  const [me, setMe] = useState<Me | null | undefined>(undefined);
+  const [session, setSession] = useState<ShopperSession | null | undefined>(undefined);
 
   useEffect(() => {
     // The outside world — a cookie this component cannot read and a session
     // only the server can resolve — which is what an effect is for.
     let cancelled = false;
     fetch(`/api/${tenant}/me`)
-      .then((response) => response.json() as Promise<{ data: Me | null }>)
+      .then((response) => response.json() as Promise<{ data: ShopperSession | null }>)
       .then((body) => {
-        if (!cancelled) setMe(body.data);
+        if (!cancelled) setSession(body.data);
       })
       .catch(() => {
-        if (!cancelled) setMe(null);
+        if (!cancelled) setSession(null);
       });
     return () => {
       cancelled = true;
     };
   }, [tenant]);
 
-  if (me === undefined) return null;
+  if (session === undefined) return null;
 
-  return me ? (
+  return session ? (
     <Link
       href={`/${tenant}/account`}
       className="text-body-sm font-semibold text-ink hover:text-ink-strong"
     >
-      {me.buyer.name ?? "Your orders"}
+      {session.shopper.name ?? "Your orders"}
     </Link>
   ) : (
     <Link

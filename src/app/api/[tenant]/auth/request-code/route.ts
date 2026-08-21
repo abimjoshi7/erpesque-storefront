@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { errorResponse } from "@/lib/cart-request";
+import { authErrorResponse } from "@/lib/cart-request";
 import { shopperIp } from "@/lib/client-ip";
 import { requestLoginCode } from "@/lib/erp";
 import { forbiddenResponse, isSameOrigin } from "@/lib/same-origin";
@@ -13,6 +13,12 @@ import { forbiddenResponse, isSameOrigin } from "@/lib/same-origin";
  * would turn this endpoint into a way of asking who the shop's customers are.
  * Nothing is created here either; the customer row is written when the code is
  * verified, so this cannot be used to fill the ERP with numbers.
+ *
+ * The ERP's refusals are relayed as they are written: a number that looks
+ * wrong, a code sent moments ago, an hourly cap used up, or a shop with no SMS
+ * provider at all. Each names something the shopper or the merchant can act on,
+ * and the throttle is keyed on the number rather than the address because the
+ * number is what an SMS bill is run up against.
  */
 export async function POST(
   request: Request,
@@ -51,6 +57,6 @@ export async function POST(
     }
     return NextResponse.json({ data: challenge });
   } catch (error) {
-    return errorResponse(error);
+    return authErrorResponse(error);
   }
 }
