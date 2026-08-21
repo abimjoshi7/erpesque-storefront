@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { shopperIp } from "@/lib/client-ip";
 import { errorResponse, normalizeLines } from "@/lib/cart-request";
 import { placeOrder, type CartLine, type Contact } from "@/lib/erp";
+import { forbiddenResponse, isSameOrigin } from "@/lib/same-origin";
 
 /**
  * Submits the order. Same seam as the quote handler: the checkout form runs in
@@ -17,6 +18,8 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ tenant: string }> },
 ) {
+  if (!isSameOrigin(request)) return forbiddenResponse();
+
   const { tenant } = await params;
 
   let lines: CartLine[];

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { AccountLink } from "@/components/account-link";
 import { CartLink } from "@/components/cart-link";
 import { SearchBox } from "@/components/search-box";
 import { Container, Skeleton } from "@/design-system";
@@ -17,6 +18,10 @@ import { Container, Skeleton } from "@/design-system";
  * `SearchBox` reads the URL's query string, which suspends during
  * prerendering; the boundary here is what keeps that from forcing the whole
  * layout to render in the browser.
+ *
+ * `AccountLink` is a client island for a related reason: it needs to know who
+ * is signed in, and reading the session cookie here instead would make every
+ * page under `/{tenant}` render per request.
  */
 export function ShopHeader({ tenant, shopName }: { tenant: string; shopName: string }) {
   return (
@@ -41,6 +46,7 @@ export function ShopHeader({ tenant, shopName }: { tenant: string; shopName: str
           <Suspense fallback={<SearchBoxFallback />}>
             <SearchBox tenant={tenant} />
           </Suspense>
+          <AccountLink tenant={tenant} />
           <span className="hidden sm:inline">
             <CartLink tenant={tenant} />
           </span>

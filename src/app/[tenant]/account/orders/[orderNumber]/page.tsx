@@ -1,42 +1,51 @@
-import { notFound } from "next/navigation";
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 
 import { StatusPill, Text } from "@/design-system";
-import { fetchOrderStatus } from "@/lib/erp";
+import { fetchAccountOrder, isUnauthorized } from "@/lib/erp";
 import { formatPrice } from "@/lib/money";
 import { formatOrderDate, statusCopy } from "@/lib/order-status";
+import { readSession } from "@/lib/session";
 
-import { CancelOrder } from "./cancel-button";
-
-type PageProps = {
-  params: Promise<{ tenant: string; token: string }>;
-};
-
-/**
- * The token in this URL is the only thing standing between a stranger and
- * someone's name, phone number and home address, so the page is kept out of
- * search indexes and out of referrer headers.
- *
- * `noindex` is not paranoia: shoppers paste links into chat apps that follow
- * them, and a crawler that reached one would put a delivery address in a search
- * result.
- */
 export const metadata: Metadata = {
   title: "Your order",
   robots: { index: false, follow: false },
-  referrer: "no-referrer",
 };
 
-/** Personal and changes as the shop works through it — never prerendered. */
 export const dynamic = "force-dynamic";
 
-export default async function OrderStatusPage({ params }: PageProps) {
-  const { tenant, token } = await params;
-  const order = await fetchOrderStatus(tenant, token);
+/**
+ * One of the account's own orders, reached by its number rather than by a
+ * status token.
+ *
+ * Order numbers are sequential and guessable, which is the whole reason guests
+ * get an opaque token instead. This page is safe for a different reason: the
+ * session is the authorisation, not the number in the URL. The ERP scopes the
+ * lookup to the signed-in account, so another account's order number comes back
+ * as the same 404 as one that was never issued.
+ *
+ * It renders from the same copy and the same helpers as the guest status page,
+ * so the two describe an order identically.
+ */
+export default async function AccountOrderPage({
+  params,
+}: {
+  params: Promise<{ tenant: string; orderNumber: string }>;
+}) {
+  const { tenant, orderNumber } = await params;
 
-  // A wrong token, a token for another shop, and an order that never existed
-  // are all this same 404 — which is what stops the page being used to find out
-  // whether an order number is real.
+  const session = await readSession(tenant);
+  if (!session) redirect(`/${tenant}/sign-in`);
+
+  let order;
+  try {
+    order = await fetchAccountOrder(tenant, session, orderNumber);
+  } catch (error) {
+    if (isUnauthorized(error)) redirect(`/${tenant}/sign-in`);
+    throw error;
+  }
+
   if (!order) notFound();
 
   const currency = order.currency;
@@ -44,8 +53,12 @@ export default async function OrderStatusPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
-      <Text as="h1" variant="displayMedium">
-        Order {order.orderNumber ?? ""}
+      <Link href={`/${tenant}/account`} className="text-body-sm underline">
+        All your orders
+      </Link>
+
+      <Text as="h1" variant="displayMedium" className="mt-4">
+        Order {order.orderNumber ?? orderNumber}
       </Text>
 
       {order.orderDate ? (
@@ -104,16 +117,6 @@ export default async function OrderStatusPage({ params }: PageProps) {
           <p className="mt-3 text-ink-muted italic">“{order.note}”</p>
         ) : null}
       </section>
-
-      {order.cancellable ? (
-        <CancelOrder tenant={tenant} token={token} />
-      ) : (
-        <Text variant="bodySmall" tone="muted" className="mt-8">
-          {order.status === "cancelled"
-            ? "This order has been cancelled."
-            : "The shop has started on this order, so it can no longer be cancelled here. Call them if something has changed."}
-        </Text>
-      )}
     </main>
   );
 }

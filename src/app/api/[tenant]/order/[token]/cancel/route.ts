@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { errorResponse } from "@/lib/cart-request";
 import { shopperIp } from "@/lib/client-ip";
 import { cancelOrder } from "@/lib/erp";
+import { forbiddenResponse, isSameOrigin } from "@/lib/same-origin";
 
 /**
  * Self-cancel, from the shopper's status page.
@@ -19,6 +20,8 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ tenant: string; token: string }> },
 ) {
+  if (!isSameOrigin(request)) return forbiddenResponse();
+
   const { tenant, token } = await params;
 
   try {
