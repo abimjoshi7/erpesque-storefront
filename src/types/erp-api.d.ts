@@ -10356,7 +10356,12 @@ export interface paths {
         put?: never;
         /**
          * Place a web order
-         * @description Unauthenticated. Prices the cart exactly as `/quote` does, then writes an
+         * @description The shopper's session is optional. Presenting one stamps
+         *     `storefront_account_id` on the order; a guest, or a session that has
+         *     expired, places a guest order exactly as before - a missing or stale
+         *     session is never a reason a checkout fails.
+         *
+         *     Prices the cart exactly as `/quote` does, then writes an
          *     ordinary `sales_orders` row with `source = 'web'`,
          *     `fulfillment_status = 'draft'` and `approval_status = 1` - so it appears
          *     in the approval queue staff already work from, and nothing reaches the
@@ -10365,6 +10370,12 @@ export interface paths {
          *     `party_id` is left NULL. The shopper is recorded in
          *     `storefront_customers`, keyed by the canonical phone so repeat guests
          *     converge on one record however they typed their number.
+         *
+         *     `storefront_customer_id` records who typed the order and
+         *     `storefront_account_id` who is billed for it - for a business those are
+         *     different people. An order placed while signed out is attributed to an
+         *     account retroactively, by phone, at that shopper's next sign-in, so
+         *     order history fills in either way.
          *
          *     Approving the order (`approval_status` 2 or above, or moving
          *     fulfillment to `confirmed`) matches the shopper against existing

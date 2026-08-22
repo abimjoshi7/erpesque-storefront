@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "types:generate": "openapi-typescript ${ERP_OPENAPI:-../erp/server/openapi.yaml} -o src/types/erp-api.d.ts",
+    "types:generate": "node scripts/generate-erp-types.mjs",
     "types:check": "npm run types:generate && git diff --exit-code -- src/types/erp-api.d.ts"
   },
   "dependencies": {
