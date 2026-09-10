@@ -75,6 +75,42 @@ after an overnight repricing. Checkout re-prices again as it writes the order,
 so what is ordered is always what the shop currently sells at the price it
 currently charges — the total displayed is never an input to anything.
 
+## Buyer sessions
+
+Decision `docs/decisions/0002-buyer-login.md` has the reasoning; the rules this
+app has to keep are short.
+
+A shopper signs in with a phone number and a one-time code. The ERP mints an
+opaque session token and keeps only its SHA-256; the token itself lives in an
+httpOnly, `SameSite=Lax` cookie scoped to `/{tenant}`, and travels to the ERP in
+`X-Shopper-Session` — never `Authorization`, which the edge gate reserves for
+staff JWTs. `src/lib/session.ts` is the only place the cookie's attributes are
+decided, and `/api/{tenant}/auth/verify-code` is the only place it is written.
+
+There is no challenge handle between the two steps. The ERP keeps one live code
+per phone number, so step two submits the number again alongside the digits —
+which is also what lets the send throttle count, since a resend updates that one
+row instead of creating a rival.
+
+Three rules go with it:
+
+- **Session calls never cache.** Next's data cache keys on the URL and does not
+  vary on headers, so a cached order history would be replayed to the next
+  shopper who asked. Everything under the buyer-session block in `src/lib/erp.ts`
+  uses `cache: "no-store"` and never `next: { revalidate }`.
+- **No `cookies()` in `src/app/[tenant]/layout.tsx`.** It is a request-time API,
+  and reading it there would make every page beneath `/{tenant}` render per
+  request to decide one header link. The account slot is a client island
+  (`src/components/account-link.tsx`) that asks `/api/{tenant}/me` after
+  hydration instead.
+- **Every mutating route handler checks the origin.** A cookie is an ambient
+  credential, so `POST` handlers call `isSameOrigin` from
+  `src/lib/same-origin.ts` first. Next does this for Server Actions on its own
+  and not for route handlers.
+
+Guest checkout is untouched: no session header, no account, a status token
+issued as before, and every existing `/{tenant}/order/{token}` link still works.
+
 ## Status
 
 Every public `/storefront/*` endpoint the ERP exposes is consumed here:
@@ -90,9 +126,23 @@ Every public `/storefront/*` endpoint the ERP exposes is consumed here:
 | `POST /order` | Checkout |
 | `GET /order/{token}` | `/{tenant}/order/{token}` |
 | `POST /order/{token}/cancel` | Self-cancel while the order is still a draft |
+| `POST /auth/request-code` | `/{tenant}/sign-in`, step one |
+| `POST /auth/verify` | `/{tenant}/sign-in`, step two — the only place the cookie is written |
+| `POST /auth/logout` | Sign out, which revokes at the ERP before clearing the cookie |
+| `GET /auth/session` | The header's account slot, via `/api/{tenant}/me` |
+| `GET /account/orders` | `/{tenant}/account` — order history |
+| `GET /account/orders/{orderNumber}` | `/{tenant}/account/orders/{orderNumber}` |
 
 Orders land in the ERP as draft sales orders awaiting staff approval; payment is
 on delivery.
+
+The six buyer-login endpoints landed on the ERP's `feat/storefront` branch, so
+their shapes come from the generated types like everything else. Point
+`ERP_OPENAPI` at that checkout until it merges:
+
+```bash
+ERP_OPENAPI=../erp-server/server/openapi.yaml npm run types:generate
+```
 
 The shop's chrome — name, search box, cart count, footer — lives in
 `src/app/[tenant]/layout.tsx`, which is also where the shop-exists check
@@ -111,3 +161,7 @@ different from a shop that is closed.
   and offers no `?sort=`, so there is nothing to render a control for yet.
 - **`sitemap.truncated` is ignored.** The ERP caps the slug list; a shop large
   enough to hit that cap needs a paginated sitemap index here.
+- **A signed-in buyer cannot cancel from their account.** Self-cancel hangs off
+  the status token, and an order reached by its number does not carry one, so
+  `/{tenant}/account/orders/{orderNumber}` is read-only. The token link still
+  cancels.

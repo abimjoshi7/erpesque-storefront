@@ -6,13 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "node scripts/assert-clean-deploy-env.mjs && opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "types:generate": "openapi-typescript ${ERP_OPENAPI:-../erp/server/openapi.yaml} -o src/types/erp-api.d.ts",
+    "types:generate": "node scripts/generate-erp-types.mjs",
     "types:check": "npm run types:generate && git diff --exit-code -- src/types/erp-api.d.ts"
   },
   "dependencies": {
-    "next": "16.3.1",
+    "@opennextjs/cloudflare": "1.20.6",
+    "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1"
@@ -23,9 +26,10 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.1",
+    "eslint-config-next": "16.3.4",
     "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "4.131.0"
   }
 }

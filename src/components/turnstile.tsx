@@ -3,11 +3,13 @@
 import { useEffect, useRef } from "react";
 
 /**
- * Cloudflare Turnstile, guarding order submission.
+ * Cloudflare Turnstile, guarding order submission and the sign-in code request.
  *
  * The widget produces a token; the ERP verifies it against Cloudflare before it
- * will write an order. Solving it is usually invisible — most shoppers see a
- * spinner resolve itself and nothing else.
+ * will write an order or send a code. Solving it is usually invisible — most
+ * shoppers see a spinner resolve itself and nothing else. It guards both because
+ * both cost the shop something a script could spend: an order costs a rider's
+ * time, and a code costs a message.
  *
  * Renders nothing when `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is unset. That matches
  * the server, which skips the check when it has no secret key, so a local or

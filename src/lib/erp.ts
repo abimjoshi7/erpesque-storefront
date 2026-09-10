@@ -417,3 +417,270 @@ export async function fetchProduct(
     `/storefront/${encodeURIComponent(tenantCode)}/product/${encodeURIComponent(slug)}`,
   );
 }
+
+/* ------------------------------------------------------------------------- *
+ * Buyer sessions
+ *
+ * Everything below carries a signed-in shopper's session. Two rules apply to
+ * all of it and to anything added beside it.
+ *
+ * First: never `next: { revalidate }`, always `cache: "no-store"`. Next's data
+ * cache keys on the URL and does not vary on headers, so a cached response to
+ * the order history would be handed to the next shopper who asked — someone
+ * else's addresses and someone else's totals. The `get` helper above defaults
+ * to a sixty-second revalidate, which is right for a catalog and catastrophic
+ * here, which is why none of these calls goes through it.
+ *
+ * Second: the session rides in `X-Shopper-Session`, never in a URL and never in
+ * `Authorization`. The Worker's edge gate reserves `Authorization` for staff
+ * JWTs, and a named header alongside `X-Shopper-IP` says what it is and travels
+ * the same path.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Who is signed in — the shop, the shopper, and the accounts they may act for.
+ *
+ * Accounts are named and never numbered, deliberately: nothing here can be fed
+ * back to the ERP as a selector. `current` marks the one this session acts for.
+ */
+export type ShopperSession = components["schemas"]["StorefrontShopperSession"];
+
+/** One row of order history. Carries its own currency, so a list never has to
+ * borrow the tenant's to render a total. */
+export type OrderSummary = components["schemas"]["StorefrontOrderSummary"];
+
+/**
+ * The answer to a code request. Says nothing about whether the phone was known:
+ * the ERP answers a stranger and a regular identically, so this endpoint cannot
+ * be used to find out who shops here. There is no challenge id — the phone
+ * number is what identifies the challenge, and one number has one live code.
+ */
+export type LoginChallenge = {
+  sent: boolean;
+  expiresInSeconds: number;
+  /** Escalates with each send in the hour: 60, 120, 300, then 900. */
+  resendAfterSeconds: number;
+};
+
+/** The only copy of `token`; the ERP keeps a SHA-256 and nothing else. */
+export type LoginResult = ShopperSession & {
+  token: string;
+  /** End of the sliding idle window, extended on every authenticated request. */
+  expiresAt: string;
+  /** The hard cap, set once at sign-in and never extended. */
+  absoluteExpiresAt: string;
+};
+
+export type OrderHistory = {
+  tenant: Tenant;
+  orders: OrderSummary[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+function sessionHeaders(session: string): Record<string, string> {
+  return { "X-Shopper-Session": session };
+}
+
+/** True when the ERP says this session is no longer good. */
+export function isUnauthorized(error: unknown): boolean {
+  return error instanceof ErpError && error.status === 401;
+}
+
+/**
+ * A read on behalf of a signed-in shopper.
+ *
+ * 401 is thrown rather than folded into `null`, because by this point the shop
+ * demonstrably exists — the tenant resolved — and "sign in again" is a
+ * different outcome from "this shop is gone" that the pages need to tell apart.
+ */
+async function privateGet<T>(
+  path: string,
+  session: string,
+  search?: URLSearchParams,
+): Promise<T | null> {
+  const query = search?.toString();
+  const url = `${baseUrl()}${path}${query ? `?${query}` : ""}`;
+
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      ...authHeaders(),
+      ...sessionHeaders(session),
+    },
+    cache: "no-store",
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ErpError(response.status, path);
+
+  const body = (await response.json()) as { data: T };
+  return body.data;
+}
+
+/**
+ * A write, with or without a session.
+ *
+ * Separate from `post` rather than an extra parameter on it: the guest paths
+ * are the ones carrying real money today, and leaving their call site untouched
+ * means this change cannot alter them by accident.
+ *
+ * The ERP's own message is carried out on every rejection, not only on 400.
+ * Signing in fails with a 401 that says which of "wrong", "expired" and "asked
+ * too often" happened in the one sentence the shopper is allowed to see, and a
+ * 503 names a shop that cannot send messages at all — both are worth more to
+ * them than "something went wrong".
+ */
+async function privatePost<T>(
+  path: string,
+  payload: unknown,
+  options: { session?: string; shopperIp?: string } = {},
+): Promise<T | null> {
+  const response = await fetch(`${baseUrl()}${path}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(options.session ? sessionHeaders(options.session) : {}),
+      ...(options.shopperIp ? { "X-Shopper-IP": options.shopperIp } : {}),
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+
+  if (response.status === 404) return null;
+
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((body: { error?: string }) => body.error)
+      .catch(() => undefined);
+    throw new ErpError(response.status, path, detail);
+  }
+
+  const body = (await response.json()) as { data: T };
+  return body.data;
+}
+
+/**
+ * Asks the shop to send a one-time code.
+ *
+ * Creates no customer: the row is written when the code is verified, never
+ * here, so an unauthenticated caller cannot fill the customer table with
+ * numbers it made up.
+ */
+export async function requestLoginCode(
+  tenantCode: string,
+  phone: string,
+  turnstileToken?: string,
+  shopperIp?: string,
+): Promise<LoginChallenge | null> {
+  return privatePost<LoginChallenge>(
+    `/storefront/${encodeURIComponent(tenantCode)}/auth/request-code`,
+    { phone, turnstileToken },
+    { shopperIp },
+  );
+}
+
+/**
+ * Exchanges a code for a session.
+ *
+ * Keyed by the phone number rather than by a challenge id, because one number
+ * has exactly one live code — which is also what makes the send throttle a
+ * throttle. `name` is for a form that doubles as a sign-up; omitting it leaves
+ * whatever name the shopper's last order recorded.
+ */
+export async function verifyLoginCode(
+  tenantCode: string,
+  payload: { phone: string; code: string; name?: string },
+  shopperIp?: string,
+): Promise<LoginResult | null> {
+  return privatePost<LoginResult>(
+    `/storefront/${encodeURIComponent(tenantCode)}/auth/verify`,
+    payload,
+    { shopperIp },
+  );
+}
+
+/**
+ * Ends the session at the ERP, which is what actually matters — clearing the
+ * cookie alone would leave a token that still worked if it had been copied.
+ *
+ * `everywhere` ends every session this shopper holds, which is what a lost
+ * phone needs.
+ */
+export async function logoutBuyer(
+  tenantCode: string,
+  session: string,
+  everywhere = false,
+): Promise<{ signedOut: boolean } | null> {
+  const query = everywhere ? "?everywhere=true" : "";
+  return privatePost<{ signedOut: boolean }>(
+    `/storefront/${encodeURIComponent(tenantCode)}/auth/logout${query}`,
+    {},
+    { session },
+  );
+}
+
+/**
+ * Who the session belongs to, for the header's account slot.
+ *
+ * Reading it slides the ERP's idle window forward, so a shopper browsing the
+ * catalog stays signed in without ever visiting their account page.
+ */
+export async function fetchShopperSession(
+  tenantCode: string,
+  session: string,
+): Promise<ShopperSession | null> {
+  return privateGet<ShopperSession>(
+    `/storefront/${encodeURIComponent(tenantCode)}/auth/session`,
+    session,
+  );
+}
+
+/**
+ * The account's orders, newest first.
+ *
+ * Scoped by the ERP to the session's account and to nothing in the request, so
+ * there is no parameter here that names whose orders to return. A year of guest
+ * checkouts appears the moment someone signs in, because verifying a code
+ * adopts the orders placed against that same phone number.
+ */
+export async function fetchOrders(
+  tenantCode: string,
+  session: string,
+  query: { page?: number; limit?: number } = {},
+): Promise<OrderHistory | null> {
+  const search = new URLSearchParams();
+  if (query.page && query.page > 1) search.set("page", String(query.page));
+  if (query.limit) search.set("limit", String(query.limit));
+
+  return privateGet<OrderHistory>(
+    `/storefront/${encodeURIComponent(tenantCode)}/account/orders`,
+    session,
+    search,
+  );
+}
+
+/**
+ * One of the account's orders by its number.
+ *
+ * Order numbers are sequential and guessable, which is exactly why the status
+ * token exists for guests. This path is safe for a different reason: the
+ * session is the authorisation, not the number. The ERP folds the account into
+ * the lookup itself, so another account's order number is the same 404 as one
+ * that never existed.
+ */
+export async function fetchAccountOrder(
+  tenantCode: string,
+  session: string,
+  orderNumber: string,
+): Promise<OrderStatus | null> {
+  return privateGet<OrderStatus>(
+    `/storefront/${encodeURIComponent(tenantCode)}/account/orders/${encodeURIComponent(orderNumber)}`,
+    session,
+  );
+}
