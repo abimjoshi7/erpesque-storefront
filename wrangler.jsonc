@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "erpesque-storefront",
+  // ghumtibags.com lives in this account; the local wrangler login sees two.
+  "account_id": "d1e4f92a193e307eca93931fdddbf54d",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-08-15",
+  // global_fetch_strictly_public sends fetches to api.ghumtibags.com (same
+  // zone) through Cloudflare's front door, so they reach the API Worker
+  // instead of skipping it.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "erpesque-storefront"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "shop.ghumtibags.com",
+      "custom_domain": true
+    }
+  ],
+  // ERP_CLIENT_API_KEY is a Worker secret: `npx wrangler secret put ERP_CLIENT_API_KEY`.
+  "vars": {
+    "ERP_API_URL": "https://api.ghumtibags.com"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
