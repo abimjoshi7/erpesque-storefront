@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+
 import type { components } from "@/types/erp-api";
 
 /**
@@ -171,6 +173,34 @@ function authHeaders(): Record<string, string> {
   throw new Error("Set ERP_CLIENT_API_KEY (via Worker) or ERP_ORIGIN_API_KEY (direct to origin)");
 }
 
+type ServiceBinding = {
+  fetch(input: string, init?: RequestInit): Promise<Response>;
+};
+
+/**
+ * On Cloudflare the ERP is reached through the `ERP_API` service binding, not
+ * its public URL. api.ghumtibags.com shares this Worker's zone, and a same-zone
+ * Worker-to-Worker fetch fails with error 1042 — served as a 404 that reads
+ * exactly like a missing shop. The URL still carries the path; the binding
+ * ignores the host.
+ *
+ * Anywhere without the binding (`next dev`, `next start`) falls back to a plain
+ * fetch against ERP_API_URL.
+ */
+function erpFetch(url: string, init: RequestInit): Promise<Response> {
+  const binding = erpBinding();
+  return binding ? binding.fetch(url, init) : fetch(url, init);
+}
+
+function erpBinding(): ServiceBinding | undefined {
+  try {
+    return (getCloudflareContext().env as { ERP_API?: ServiceBinding }).ERP_API;
+  } catch {
+    // No Workers request context: next dev, next start, or build time.
+    return undefined;
+  }
+}
+
 /**
  * `null` on 404 so callers can decide what a missing thing means, rather than
  * having to catch an exception for an expected outcome.
@@ -179,7 +209,7 @@ async function get<T>(path: string, search?: URLSearchParams): Promise<T | null>
   const query = search?.toString();
   const url = `${baseUrl()}${path}${query ? `?${query}` : ""}`;
 
-  const response = await fetch(url, {
+  const response = await erpFetch(url, {
     headers: { Accept: "application/json", ...authHeaders() },
     // Catalog pages are cached at the edge for a minute; add-to-cart and
     // checkout will re-read live. A shopper may briefly see a price that is
@@ -224,7 +254,7 @@ export async function fetchCatalog(
  */
 export async function fetchFacets(tenantCode: string): Promise<Facets | null> {
   const path = `/storefront/${encodeURIComponent(tenantCode)}/facets`;
-  const response = await fetch(`${baseUrl()}${path}`, {
+  const response = await erpFetch(`${baseUrl()}${path}`, {
     headers: { Accept: "application/json", ...authHeaders() },
     next: { revalidate: 3600 },
   });
@@ -262,7 +292,7 @@ export async function fetchShop(tenantCode: string): Promise<Tenant | null> {
  * every request regardless.
  */
 export async function fetchMedia(apiPath: string): Promise<Response> {
-  return fetch(`${baseUrl()}${apiPath}`, {
+  return erpFetch(`${baseUrl()}${apiPath}`, {
     headers: authHeaders(),
     // The ERP marks these immutable for a year and the browser will honour
     // that; caching the bytes in the Next data cache as well would spend the
@@ -281,7 +311,7 @@ async function post<T>(
   payload: unknown,
   shopperIp?: string,
 ): Promise<T | null> {
-  const response = await fetch(`${baseUrl()}${path}`, {
+  const response = await erpFetch(`${baseUrl()}${path}`, {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -357,7 +387,7 @@ export async function fetchOrderStatus(
   token: string,
 ): Promise<OrderStatus | null> {
   const path = `/storefront/${encodeURIComponent(tenantCode)}/order/${encodeURIComponent(token)}`;
-  const response = await fetch(`${baseUrl()}${path}`, {
+  const response = await erpFetch(`${baseUrl()}${path}`, {
     headers: { Accept: "application/json", ...authHeaders() },
     cache: "no-store",
   });
@@ -395,7 +425,7 @@ export async function fetchSitemap(
   tenantCode: string,
 ): Promise<{ tenant: Tenant; products: SitemapEntry[]; truncated: boolean } | null> {
   const path = `/storefront/${encodeURIComponent(tenantCode)}/sitemap`;
-  const response = await fetch(`${baseUrl()}${path}`, {
+  const response = await erpFetch(`${baseUrl()}${path}`, {
     headers: { Accept: "application/json", ...authHeaders() },
     next: { revalidate: 3600 },
   });
@@ -504,7 +534,7 @@ async function privateGet<T>(
   const query = search?.toString();
   const url = `${baseUrl()}${path}${query ? `?${query}` : ""}`;
 
-  const response = await fetch(url, {
+  const response = await erpFetch(url, {
     headers: {
       Accept: "application/json",
       ...authHeaders(),
@@ -538,7 +568,7 @@ async function privatePost<T>(
   payload: unknown,
   options: { session?: string; shopperIp?: string } = {},
 ): Promise<T | null> {
-  const response = await fetch(`${baseUrl()}${path}`, {
+  const response = await erpFetch(`${baseUrl()}${path}`, {
     method: "POST",
     headers: {
       Accept: "application/json",

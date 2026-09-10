@@ -5,9 +5,7 @@
   "account_id": "d1e4f92a193e307eca93931fdddbf54d",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-08-15",
-  // global_fetch_strictly_public sends fetches to api.ghumtibags.com (same
-  // zone) through Cloudflare's front door, so they reach the API Worker
-  // instead of skipping it.
+  // OpenNext's recommended flags.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
     "directory": ".open-next/assets",
@@ -17,12 +15,26 @@
     {
       "binding": "WORKER_SELF_REFERENCE",
       "service": "erpesque-storefront"
+    },
+    // The ERP API Worker, called through this binding rather than its public
+    // URL: api.ghumtibags.com shares this zone, and a same-zone Worker-to-Worker
+    // fetch fails with Cloudflare error 1042 (served as a 404). See src/lib/erp.ts.
+    {
+      "binding": "ERP_API",
+      "service": "erpesque"
     }
   ],
   "routes": [
     {
       "pattern": "shop.ghumtibags.com",
       "custom_domain": true
+    },
+    // The zone routes `*.ghumtibags.com/*` to the Ghumti Bags site Worker, and
+    // that wildcard wins over the custom domain above. A more specific route
+    // takes precedence — the same way api. and nsbs. escape it.
+    {
+      "pattern": "shop.ghumtibags.com/*",
+      "zone_name": "ghumtibags.com"
     }
   ],
   // ERP_CLIENT_API_KEY is a Worker secret: `npx wrangler secret put ERP_CLIENT_API_KEY`.
