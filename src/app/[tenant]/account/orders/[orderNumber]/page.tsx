@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { StatusPill, Text } from "@/design-system";
 import { fetchAccountOrder, isUnauthorized } from "@/lib/erp";
 import { formatPrice } from "@/lib/money";
+import { signInHref } from "@/lib/next-path";
 import { formatOrderDate, statusCopy } from "@/lib/order-status";
 import { readSession } from "@/lib/session";
 
@@ -35,14 +36,17 @@ export default async function AccountOrderPage({
 }) {
   const { tenant, orderNumber } = await params;
 
+  // Back to this order after signing in, not to the list above it.
+  const signIn = signInHref(tenant, `/${tenant}/account/orders/${encodeURIComponent(orderNumber)}`);
+
   const session = await readSession(tenant);
-  if (!session) redirect(`/${tenant}/sign-in`);
+  if (!session) redirect(signIn);
 
   let order;
   try {
     order = await fetchAccountOrder(tenant, session, orderNumber);
   } catch (error) {
-    if (isUnauthorized(error)) redirect(`/${tenant}/sign-in`);
+    if (isUnauthorized(error)) redirect(signIn);
     throw error;
   }
 

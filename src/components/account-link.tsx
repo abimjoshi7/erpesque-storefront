@@ -1,43 +1,35 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 
-import type { ShopperSession } from "@/lib/erp";
+import { useShopper } from "@/components/shopper-provider";
+import { signInHref } from "@/lib/next-path";
 
 /**
  * "Sign in", or the buyer's name once they are.
  *
- * A client component that asks after hydration, rather than a server component
- * reading the cookie. Reading a cookie in the shop layout is a request-time
- * API, and it would opt every page beneath `/{tenant}` into per-request
- * rendering — the whole catalog made dynamic to render one link. Decision 0002
- * spells this out; the cheap version is that the link is not worth the shop's
- * caching.
+ * A client component reading the shop's shared shopper state, rather than a
+ * server component reading the cookie. Reading a cookie in the shop layout is
+ * a request-time API, and it would opt every page beneath `/{tenant}` into
+ * per-request rendering — the whole catalog made dynamic to render one link.
+ * Decision 0002 spells this out; the cheap version is that the link is not
+ * worth the shop's caching.
+ *
+ * The question itself is asked once, by `ShopperProvider`, and shared with the
+ * add to cart button, so a product page does not ask it twice.
  *
  * Rendering nothing until the answer arrives, rather than a "Sign in" that
  * might immediately become a name, keeps the header from flickering between two
  * different words on every navigation.
+ *
+ * "Sign in" carries the page it was pressed on, so the shopper comes back to
+ * it rather than to their order history. The sign-in page vets that path
+ * before following it; see `lib/next-path`.
  */
 export function AccountLink({ tenant }: { tenant: string }) {
-  const [session, setSession] = useState<ShopperSession | null | undefined>(undefined);
-
-  useEffect(() => {
-    // The outside world — a cookie this component cannot read and a session
-    // only the server can resolve — which is what an effect is for.
-    let cancelled = false;
-    fetch(`/api/${tenant}/me`)
-      .then((response) => response.json() as Promise<{ data: ShopperSession | null }>)
-      .then((body) => {
-        if (!cancelled) setSession(body.data);
-      })
-      .catch(() => {
-        if (!cancelled) setSession(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tenant]);
+  const { session } = useShopper();
+  const pathname = usePathname();
 
   if (session === undefined) return null;
 
@@ -50,7 +42,7 @@ export function AccountLink({ tenant }: { tenant: string }) {
     </Link>
   ) : (
     <Link
-      href={`/${tenant}/sign-in`}
+      href={signInHref(tenant, pathname)}
       className="text-body-sm font-semibold text-ink hover:text-ink-strong"
     >
       Sign in

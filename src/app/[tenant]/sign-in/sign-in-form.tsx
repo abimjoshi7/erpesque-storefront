@@ -3,8 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { useShopper } from "@/components/shopper-provider";
 import { Turnstile } from "@/components/turnstile";
 import { Button, Field, Input, Notice, Text } from "@/design-system";
+import { safeNext } from "@/lib/next-path";
 
 /**
  * Two steps: a phone number, then the code sent to it.
@@ -21,11 +23,16 @@ import { Button, Field, Input, Notice, Text } from "@/design-system";
  * Nothing here reveals whether the number is known to the shop. The server
  * answers a stranger and a regular identically, and this form moves to the code
  * step either way.
+ *
+ * `next` has already been vetted by the page, and is vetted again here because
+ * it is about to become a navigation and this is the component that makes it —
+ * a prop is only as trustworthy as whoever renders the component next.
  */
 type Step = { name: "phone" } | { name: "code"; phone: string; resendAt: number };
 
-export function SignInForm({ tenant }: { tenant: string }) {
+export function SignInForm({ tenant, next }: { tenant: string; next: string }) {
   const router = useRouter();
+  const { refresh } = useShopper();
   const [step, setStep] = useState<Step>({ name: "phone" });
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
@@ -112,10 +119,13 @@ export function SignInForm({ tenant }: { tenant: string }) {
         setError(body.error ?? "That code was not right.");
         return;
       }
-      // The session cookie is set by the response to the call above. Navigate
-      // and refresh so the header's account slot and the account page both read
-      // the new state from the server rather than from anything held here.
-      router.push(`/${tenant}/account`);
+      // The session cookie is set by the response to the call above. The shared
+      // shopper state is asked again before navigating, so the header and the
+      // add to cart button already know by the time the next page paints; the
+      // router refresh does the same for server components. `replace` rather
+      // than `push`, so Back from the cart does not land on a spent code form.
+      await refresh();
+      router.replace(safeNext(tenant, next));
       router.refresh();
     } catch {
       setError("Could not reach the shop. Check your connection.");
