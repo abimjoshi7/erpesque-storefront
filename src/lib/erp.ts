@@ -300,7 +300,7 @@ export async function fetchShop(tenantCode: string): Promise<Tenant | null> {
  */
 export async function fetchShopLive(tenantCode: string): Promise<Tenant | null> {
   const path = `/storefront/${encodeURIComponent(tenantCode)}/facets`;
-  const response = await fetch(`${baseUrl()}${path}`, {
+  const response = await erpFetch(`${baseUrl()}${path}`, {
     headers: { Accept: "application/json", ...authHeaders() },
     cache: "no-store",
   });
