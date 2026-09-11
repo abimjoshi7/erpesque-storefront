@@ -1,9 +1,12 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 
-import { Button, Notice, QuantityStepper, Text } from "@/design-system";
+import { useShopper } from "@/components/shopper-provider";
+import { Button, ButtonLink, Notice, QuantityStepper, Text } from "@/design-system";
 import { useCart } from "@/lib/cart";
+import { signInHref } from "@/lib/next-path";
 
 /**
  * Adds a product to the cart.
@@ -11,6 +14,13 @@ import { useCart } from "@/lib/cart";
  * Takes a slug, not a price. The button has no idea what anything costs, which
  * is what makes the cart untamperable — there is nothing in the browser for an
  * attacker to change that the server would believe.
+ *
+ * On a shop that only takes orders from signed-in customers, a signed-out
+ * shopper is offered sign-in instead, and brought back to this page after. The
+ * gate is here and not only at checkout because a cart that fills freely and
+ * then refuses to become an order is a worse experience than being asked up
+ * front. It is still only a convenience: the cart page checks the session on
+ * the server, and the order route and the ERP each refuse an order without one.
  */
 export function AddToCart({
   tenant,
@@ -32,6 +42,8 @@ export function AddToCart({
   outOfStock?: boolean;
 }) {
   const { add } = useCart(tenant);
+  const { session, requireSignIn } = useShopper();
+  const pathname = usePathname();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(0);
 
@@ -54,6 +66,23 @@ export function AddToCart({
     );
   }
 
+  if (requireSignIn && session === null) {
+    return (
+      <div className="mt-8 flex flex-col items-start gap-3">
+        <ButtonLink href={signInHref(tenant, pathname)}>Sign in to buy</ButtonLink>
+        <Text variant="bodySmall" tone="subdued">
+          This shop takes orders from signed-in customers. We will text you a code;
+          there is no password.
+        </Text>
+      </div>
+    );
+  }
+
+  // Until the session is known on a gated shop, the button is shown but inert,
+  // so the layout does not jump and nothing reaches the cart that the checkout
+  // would then refuse.
+  const deciding = requireSignIn && session === undefined;
+
   return (
     <div className="mt-8 flex flex-wrap items-center gap-4">
       <QuantityStepper
@@ -63,6 +92,7 @@ export function AddToCart({
       />
 
       <Button
+        disabled={deciding}
         onClick={() => {
           add(slug, quantity);
           setAdded(quantity);
