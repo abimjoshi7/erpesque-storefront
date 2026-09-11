@@ -4930,6 +4930,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/item/bulk-save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upsert a batch of items in one request
+         * @description Catalog import. Each row is the same shape `/item/save-item` accepts; a
+         *     row carrying a non-zero `ITEM_ID` updates that item, anything else
+         *     creates one. At most 500 rows per request.
+         *
+         *     Rows are independent: one the tenant cannot accept fails on its own and
+         *     the rest still land, so the response reports every row in request order
+         *     rather than failing as a unit.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FlexibleObject"][];
+                    };
+                };
+            };
+            responses: {
+                /** @description Per-row outcomes, in request order */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success?: boolean;
+                            savedCount?: number;
+                            failedCount?: number;
+                            results?: {
+                                /** @description Position of this row in the request. */
+                                index?: number;
+                                success?: boolean;
+                                id?: number | null;
+                                /** @description True when the row added an item rather than updating one. */
+                                created?: boolean;
+                                error?: string | null;
+                            }[];
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/item/special-type": {
         parameters: {
             query?: never;
@@ -10356,10 +10422,20 @@ export interface paths {
         put?: never;
         /**
          * Place a web order
-         * @description The shopper's session is optional. Presenting one stamps
-         *     `storefront_account_id` on the order; a guest, or a session that has
-         *     expired, places a guest order exactly as before - a missing or stale
-         *     session is never a reason a checkout fails.
+         * @description Whether a session is required is the shop's choice, published as
+         *     `StorefrontTenant.requireSignIn`. Where it is true, an order with no
+         *     session, or with one that has expired or been revoked, is refused with
+         *     401 before anything is priced or written. Where it is false, the session
+         *     is optional: presenting one stamps `storefront_account_id` on the order,
+         *     and a guest or a stale session places a guest order exactly as before.
+         *
+         *     A signed-in order is placed on the phone number the session's code was
+         *     received on. `contact.phone` is still required by the schema so the
+         *     guest and signed-in bodies stay one shape, but when a session is
+         *     presented it is ignored and the session's phone is recorded instead - a
+         *     number typed into a form proves nothing, and one a code was received on
+         *     does. Name, address and landmark are taken from the request as given,
+         *     so a buyer can send a parcel somewhere new.
          *
          *     Prices the cart exactly as `/quote` does, then writes an
          *     ordinary `sales_orders` row with `source = 'web'`,
@@ -10443,6 +10519,19 @@ export interface paths {
                 };
                 400: components["responses"]["BadRequest"];
                 /**
+                 * @description The shop requires sign-in (`requireSignIn`) and no live session was
+                 *     presented. Checked after the tenant resolves, so an unknown shop is
+                 *     still the same 404 as ever.
+                 */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /**
                  * @description Turnstile could not confirm a person submitted the order. A
                  *     Cloudflare outage does *not* produce this - a check that cannot be
                  *     made lets the order through, leaving the rate buckets as the
@@ -10458,6 +10547,19 @@ export interface paths {
                 };
                 404: components["responses"]["NotFound"];
                 429: components["responses"]["TooManyRequests"];
+                /**
+                 * @description The server is configured to require Turnstile and has no secret key
+                 *     to check a token with. A misconfiguration, not a Cloudflare outage:
+                 *     it fails closed, where an unreachable Cloudflare fails open.
+                 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -11261,6 +11363,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront-admin/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether the shop has enough configured to go live
+         * @description Authenticated, `storefront.read`. Backs the setup wizard's final step
+         *     and is also enforced server-side: `PUT /preferences` refuses to add
+         *     `storefront` to `enabledModules` for a tenant that is not yet ready.
+         *
+         *     Pricelist and location are not requirements - `PUT
+         *     /storefront-admin/settings` treats "none" as a real choice, not an
+         *     incomplete one. The one thing an empty shop cannot do without is a
+         *     product to sell. Implemented in
+         *     `routes/storefront_admin.rs::get_readiness`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Readiness state. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: {
+                                ready?: boolean;
+                                /** @description Empty when ready. */
+                                reasons?: string[];
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront-admin/items": {
         parameters: {
             query?: never;
@@ -11340,9 +11495,21 @@ export interface paths {
          *     Built for catching a catalogue up to the shop after the fact, where
          *     most items have never had a merchant write a description or pick a
          *     photo for them - unlike `PUT /storefront-admin/item`, this never
-         *     touches copy, gallery or sort weight, only `isPublished`. A slug is
+         *     touches copy or sort weight and never replaces a gallery. A slug is
          *     still generated for each item published for the first time, since a
-         *     product cannot go live without a URL.
+         *     product cannot go live without a URL. A published item whose gallery
+         *     is empty gets its catalogue photo (`items.image_path`) imported in the
+         *     background, after the response - `importingPhotos` counts them.
+         *
+         *     Send exactly one of `itemIds` (products picked one by one) or
+         *     `selection` (every product matching the publishing list's search and
+         *     filter - what "select all" means once the list is longer than one
+         *     page). A selection is resolved on the server inside the write's own
+         *     transaction, through the same WHERE clause as
+         *     `GET /storefront-admin/items`, so it covers every page, not only the
+         *     ones the client has loaded. Either way at most 5000 products per
+         *     request; a larger selection is rejected with a 400 asking the
+         *     merchant to narrow it.
          *
          *     Unpublishing an item that was never published is a no-op for that
          *     item rather than an error. All `itemIds` must belong to the tenant and
@@ -11361,14 +11528,31 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** @description `items.item_id` values; at most 500 per request. */
-                        itemIds: number[];
+                        /**
+                         * @description `items.item_id` values; at most 5000 per request.
+                         *     Duplicates are ignored. Mutually exclusive with
+                         *     `selection`.
+                         */
+                        itemIds?: number[];
+                        /**
+                         * @description Every product `GET /storefront-admin/items` would list
+                         *     under `q` and `published`, minus `excludeIds`. Mutually
+                         *     exclusive with `itemIds`.
+                         */
+                        selection?: {
+                            /** @description Same free-text search as the list's `q`. */
+                            q?: string;
+                            /** @description Same tri-state filter as the list's `published`; absent for both. */
+                            published?: boolean;
+                            /** @description Rows unticked after selecting all. */
+                            excludeIds?: number[];
+                        };
                         isPublished: boolean;
                     };
                 };
             };
             responses: {
-                /** @description How many records were actually changed. */
+                /** @description How many products the request covered, and how many actually changed. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -11376,7 +11560,19 @@ export interface paths {
                     content: {
                         "application/json": components["schemas"]["DataEnvelope"] & {
                             data?: {
+                                /** @description Products the request covered. */
+                                matched?: number;
+                                /**
+                                 * @description Products whose state actually changed; the rest
+                                 *     of `matched` were already published (or already
+                                 *     out of the shop).
+                                 */
                                 updated?: number;
+                                /**
+                                 * @description Empty galleries now being filled from catalogue
+                                 *     photos in the background.
+                                 */
+                                importingPhotos?: number;
                             };
                         };
                     };
@@ -12632,10 +12828,760 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bulk/imports/presign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Presign a source-file upload
+         * @description Issues a presigned PUT so the client uploads the source file straight to
+         *     object storage. The bytes never enter the API process, which is what lets
+         *     a file be far larger than any request body limit.
+         *
+         *     Objects land under `bulk/incoming/{tenantId}/`. An upload that is never
+         *     referenced by a job is expected and reaped by a storage lifecycle rule.
+         *
+         *     Requires `FILE_STORAGE=r2`; answers 503 otherwise.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @example specimen */
+                        entity: string;
+                        fileName: string;
+                        contentType?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Presigned upload target */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            uploadUrl?: string;
+                            objectKey?: string;
+                            contentType?: string;
+                            expiresInSecs?: number;
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bulk/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an import job
+         * @description Queues an import of a previously uploaded file.
+         *
+         *     `idempotencyKey` is required and unique per tenant. Repeating it with an
+         *     identical payload returns the original job; repeating it with a *different*
+         *     payload is a 409, because silently returning a job running the previous
+         *     settings would be worse than failing.
+         *
+         *     Only one import per entity may be queued or running per tenant at a time.
+         *
+         *     Authorization: `bulk.operate` plus the entity's own **write** permission.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description `item` is the real catalog; `specimen` is the pipeline's own
+                         *     fixture domain, kept so the machinery can be exercised
+                         *     without accounting rules in the way.
+                         * @example item
+                         * @enum {string}
+                         */
+                        entity: "item" | "specimen";
+                        idempotencyKey: string;
+                        /**
+                         * @description Must sit under this tenant's `bulk/incoming/` prefix.
+                         *
+                         *     `synthetic:{total}` (optionally
+                         *     `synthetic:{total}:{invalidEvery}`) generates rows instead of
+                         *     reading a file, for load-testing the pipeline against any
+                         *     entity. e.g. `synthetic:10000:1000` runs ten thousand rows
+                         *     with every thousandth deliberately invalid. Generated rows
+                         *     are written for real unless `dryRun` is set.
+                         */
+                        sourceObjectKey: string;
+                        fileName?: string;
+                        /** Format: int64 */
+                        fileBytes?: number;
+                        /**
+                         * @default skip_invalid
+                         * @enum {string}
+                         */
+                        failureMode?: "skip_invalid" | "validate_then_apply" | "abort_on_first_error" | "error_threshold";
+                        /**
+                         * @description Required by, and only valid with, `failureMode: error_threshold`.
+                         *     Compared against failed/processed rows once at least 100 rows
+                         *     have been seen — never against the estimated total.
+                         */
+                        errorThreshold?: number;
+                        /** @default false */
+                        dryRun?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Job queued, or the existing job for this idempotency key */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            jobId?: string;
+                            status?: string;
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                /**
+                 * @description Idempotency key reused for a different request, or an import of this
+                 *     entity is already queued or running for this tenant.
+                 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /**
+                 * @description This tenant already has the maximum number of jobs queued or running.
+                 *     One worker serves every tenant, so queue *depth* is what is limited,
+                 *     not request rate — one accepted call can be an hour of work. Retrying
+                 *     the same idempotency key is always safe: an existing job is returned
+                 *     before the limit is consulted.
+                 */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bulk/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an export job
+         * @description Queues an export. Any number may run concurrently for one entity — an
+         *     export is read-only and has none of an import's race characteristics.
+         *
+         *     The worker writes a gzipped CSV whose header is the importer's own column
+         *     contract, so an export can be edited and fed straight back to
+         *     `POST /v1/bulk/imports`. Both `kind` and `kind_id` are written: the id
+         *     restores the exact reference within the exporting tenant, and the name is
+         *     what still resolves when the file is imported into a different one.
+         *
+         *     The artifact is published only when it is complete — a cancelled or
+         *     failed run uploads nothing — and is deleted 7 days after it is written.
+         *     Poll `GET /v1/bulk/jobs/{jobId}`; it answers with `downloadUrl` where R2
+         *     is configured and always with `downloadPath`, which is the route to fetch
+         *     the file through this API when there is no link to presign.
+         *
+         *     Authorization: `bulk.operate` plus the entity's own **read** permission.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description `item` is the real catalog; `specimen` is the pipeline's own
+                         *     fixture domain, kept so the machinery can be exercised
+                         *     without accounting rules in the way.
+                         * @example item
+                         * @enum {string}
+                         */
+                        entity: "item" | "specimen";
+                        idempotencyKey: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Job queued, or the existing job for this idempotency key */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            jobId?: string;
+                            status?: string;
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                /** @description Idempotency key reused for a different request */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /**
+                 * @description This tenant already has the maximum number of jobs queued or running.
+                 *     One worker serves every tenant, so queue *depth* is what is limited,
+                 *     not request rate — one accepted call can be an hour of work. Retrying
+                 *     the same idempotency key is always safe: an existing job is returned
+                 *     before the limit is consulted.
+                 */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bulk/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List this tenant's bulk jobs */
+        get: {
+            parameters: {
+                query?: {
+                    kind?: "import" | "export";
+                    status?: "queued" | "validating" | "running" | "succeeded" | "partially_succeeded" | "failed" | "cancelled" | "dead_letter";
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Newest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            datas?: components["schemas"]["BulkJob"][];
+                            hasMore?: boolean;
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bulk/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a job
+         * @description The authoritative state of a job. SSE is a notification channel; this is
+         *     the truth, and a client that missed events reads here rather than trying
+         *     to reconstruct state from a stream with holes in it.
+         *
+         *     For a finished export this is also where the artifact is collected.
+         *     `downloadUrl` is a freshly presigned link to `outputObjectKey` — absent
+         *     while the job is still running, and absent on a server storing files
+         *     locally, where there is nothing to presign. `downloadPath` is always
+         *     present and always works: it is
+         *     `GET /v1/bulk/jobs/{jobId}/download`, which streams the file through
+         *     this API.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulkJob"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bulk/jobs/{jobId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download an export's artifact
+         * @description Streams a finished export through this API. The counterpart of
+         *     `POST /v1/bulk/imports/upload`, and it exists for the same reason:
+         *     presigning needs `FILE_STORAGE=r2`, so under `FILE_STORAGE=local` there
+         *     is no `downloadUrl` to follow and the export half of the pipeline would
+         *     otherwise be unreachable.
+         *
+         *     Where R2 is configured the presigned `downloadUrl` is still the better
+         *     path — it does not push the bytes through this process — and this route
+         *     stays as the fallback that always works.
+         *
+         *     The stored artifact is gzipped; this serves it **decoded**, as
+         *     `text/csv`. No `Content-Length` is sent: the decoded size is not known
+         *     until the file has been decoded, and buffering it to find out would undo
+         *     the streaming.
+         *
+         *     `404` when the job has no artifact — still running, cancelled, or failed
+         *     before publishing one.
+         *
+         *     Authorization: `bulk.operate` plus the entity's own **read** permission,
+         *     the same as creating the export. Holding a job id is not authority to
+         *     read the catalog it was made from.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The export as CSV */
+                200: {
+                    headers: {
+                        /** @description attachment; filename="{entity}-export-{jobId}.csv" */
+                        "Content-Disposition"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bulk/jobs/{jobId}/errors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a job's row errors
+         * @description Row-level rejections, in file order. Errors stored in the database are
+         *     capped; when `errorReportKey` is present the complete report lives in
+         *     object storage and this listing is only the head of it.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Row errors */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            datas?: {
+                                /** Format: int64 */
+                                rowNumber?: number;
+                                code?: string;
+                                /**
+                                 * @description `error` means the row was not imported; `warning` means it was, with something dropped or coerced — an unresolved cross-tenant reference, say. Clients that treat both as failures report a successful import as a wall of errors.
+                                 * @enum {string}
+                                 */
+                                severity?: "error" | "warning";
+                                columnName?: string | null;
+                                message?: string;
+                                rawRow?: Record<string, never> | null;
+                            }[];
+                            hasMore?: boolean;
+                            /** @description Present once a job produced more notes than the in-database cap holds. When it is set, this paged response is a prefix of the report and the CSV at this key is the whole of it. */
+                            errorReportKey?: string | null;
+                            /** @description Presigned GET for the report CSV. Null when the server runs `FILE_STORAGE=local`, which cannot presign — the key is still returned. */
+                            errorReportUrl?: string | null;
+                            /** @description Lifetime of `errorReportUrl`, in seconds. Absent when there is no URL. */
+                            errorReportExpiresIn?: number;
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bulk/jobs/{jobId}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream job progress (SSE)
+         * @description Live progress for one job, as `text/event-stream`.
+         *
+         *     The first event is always a snapshot of the job as it stands, so a client
+         *     that connects late is not left staring at an empty stream. After that,
+         *     one event per checkpoint (roughly per 1,000 rows), and a final event when
+         *     the job reaches a terminal status — **the stream then ends**, so a client
+         *     can await completion instead of polling for it. A job that had already
+         *     finished when the stream opened gets its snapshot and an immediate close.
+         *
+         *     **This is notification, not truth.** Events are not durable: nothing is
+         *     replayed to a client that reconnects, and a server with more than one
+         *     process only relays what its own worker did. Every event is a subset of
+         *     `GET /v1/bulk/jobs/{jobId}`, which is authoritative — a client that
+         *     misses everything is one request away from correct state.
+         *
+         *     Events may arrive out of order relative to a snapshot read separately.
+         *     Compare `version`, which only ever increases, rather than trusting
+         *     arrival order.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description An SSE stream of progress events */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/event-stream": components["schemas"]["BulkJobEvent"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bulk/jobs/{jobId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request cancellation
+         * @description **Cancellation is cooperative.** This raises a flag; the worker observes
+         *     it at the next batch boundary, commits the batch already in flight, and
+         *     only then moves the job to `cancelled`. It is not instantaneous and must
+         *     not be presented to users as though it were.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Cancellation requested */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            jobId?: string;
+                            cancelRequested?: boolean;
+                            note?: string;
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+                /** @description Job already finished, or changed concurrently */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description One progress update from `GET /v1/bulk/jobs/{jobId}/events`. Deliberately
+         *     the counters and nothing else — the full record is one `GET` away, and a
+         *     notification channel that grows into a second read API acquires none of
+         *     the authorization or versioning the real one has.
+         */
+        BulkJobEvent: {
+            /** Format: uuid */
+            jobId?: string;
+            /** @enum {string} */
+            status?: "queued" | "validating" | "running" | "succeeded" | "partially_succeeded" | "failed" | "cancelled" | "dead_letter";
+            /** Format: int64 */
+            processedRows?: number;
+            /** Format: int64 */
+            succeededRows?: number;
+            /** Format: int64 */
+            failedRows?: number;
+            /** Format: int64 */
+            totalRows?: number | null;
+            /**
+             * @description Monotonic. The tiebreaker when an event and a separately-read
+             *     snapshot disagree: apply the higher version, discard the lower.
+             */
+            version?: number;
+        };
+        /**
+         * @description A durable import or export job. `sourceObjectKey` and `outputObjectKey`
+         *     are deliberately separate rather than one overloaded key: an import reads
+         *     its source, an export writes its artifact, and only one of the two is ever
+         *     meaningful for a given job.
+         */
+        BulkJob: {
+            /** Format: uuid */
+            jobId?: string;
+            tenantId?: number;
+            createdBy?: number;
+            /** @enum {string} */
+            kind?: "import" | "export";
+            entity?: string;
+            /** @enum {string} */
+            status?: "queued" | "validating" | "running" | "succeeded" | "partially_succeeded" | "failed" | "cancelled" | "dead_letter";
+            /** @enum {string} */
+            failureMode?: "skip_invalid" | "validate_then_apply" | "abort_on_first_error" | "error_threshold";
+            errorThreshold?: number | null;
+            dryRun?: boolean;
+            idempotencyKey?: string;
+            /** @description Import input. */
+            sourceObjectKey?: string | null;
+            /** @description Export artifact; null until the worker writes it. */
+            outputObjectKey?: string | null;
+            errorReportKey?: string | null;
+            /**
+             * @description Presigned link to `outputObjectKey`, minted per request rather than
+             *     stored, so it cannot go stale on the job row. Present only on
+             *     `GET /v1/bulk/jobs/{jobId}`, only once the artifact has been written,
+             *     and null under `FILE_STORAGE=local`, where presigning is unavailable
+             *     and `outputObjectKey` is all there is — fetch the file through
+             *     `downloadPath` instead.
+             */
+            downloadUrl?: string | null;
+            /** @description Seconds `downloadUrl` remains valid. */
+            downloadExpiresIn?: number | null;
+            /**
+             * @description Path on this API that streams the artifact, present on
+             *     `GET /v1/bulk/jobs/{jobId}` whenever the job has one. Unlike
+             *     `downloadUrl` it does not depend on the storage backend, so it is
+             *     what a client should follow when no link could be presigned.
+             */
+            downloadPath?: string | null;
+            fileName?: string | null;
+            /** Format: int64 */
+            fileBytes?: number | null;
+            /**
+             * Format: int64
+             * @description For an import, an estimate until the source has been read to the end.
+             *     For an export, an exact count taken when the run started — of a table
+             *     that may still be changing, so the final `processedRows` can land
+             *     just under it.
+             */
+            totalRows?: number | null;
+            /** Format: int64 */
+            processedRows?: number;
+            /** Format: int64 */
+            succeededRows?: number;
+            /**
+             * Format: int64
+             * @description How many of `succeededRows` were inserts. The rest updated a row the
+             *     tenant already had — an import matches on a natural key, so re-running
+             *     one is ordinary, and "400 added" and "400 overwritten" are different
+             *     answers to the question the person who ran it is asking. Updated is
+             *     `succeededRows - createdRows`; only the created half is stored, so the
+             *     two cannot drift apart.
+             *
+             *     A `dryRun` counts every valid row as a creation: it does not do the
+             *     lookup a write would, and reporting "0 new" for a file that would
+             *     create everything is the more misleading of the two answers.
+             */
+            createdRows?: number;
+            /** Format: int64 */
+            failedRows?: number;
+            /**
+             * Format: int64
+             * @description Records consumed. On an import it is advanced in the same transaction
+             *     as the batch it describes, which is what makes a resume exact. On an
+             *     export it counts rows written to the artifact and is progress only:
+             *     the artifact is spooled on the worker's disk, so a retried export
+             *     starts the file again from row one and resets this to zero.
+             */
+            cursorOffset?: number;
+            attempt?: number;
+            maxAttempts?: number;
+            cancelRequested?: boolean;
+            /** @description Optimistic-concurrency token. */
+            version?: number;
+            errorCode?: string | null;
+            errorMessage?: string | null;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            completedAt?: string | null;
+            /** Format: date-time */
+            expiresAt?: string | null;
+        };
         HealthResponse: {
             /** @example ok */
             status: string;
@@ -13119,6 +14065,16 @@ export interface components {
                  */
                 name?: string | null;
                 phone: string;
+                /**
+                 * @description The delivery address on this shopper's most recent order, for
+                 *     checkout to offer as a default. Read from the order rather than
+                 *     stored on the shopper, so it is a suggestion and never a saved
+                 *     address a public endpoint could rewrite. Null before a first
+                 *     order.
+                 */
+                address?: string | null;
+                /** @description The landmark from that same order, when it had one. */
+                landmark?: string | null;
             };
             /**
              * @description Every account this shopper may act for. One personal account is
@@ -13166,6 +14122,13 @@ export interface components {
         StorefrontTenant: {
             /** @description `tenants.tenant_code`, the shop's URL segment. */
             code: string;
+            /**
+             * @description True when only signed-in shoppers may fill a cart and check out.
+             *     The storefront uses it to decide whether to send a shopper to
+             *     sign-in; `POST /order` enforces it independently with 401, so a
+             *     client that ignores it gains nothing.
+             */
+            requireSignIn: boolean;
             /**
              * @description Display name. Currently echoes `code` - `tenants` has no name column,
              *     so this becomes a storefront preference when merchant settings ship.
