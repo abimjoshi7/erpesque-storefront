@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { useShopper } from "@/components/shopper-provider";
 import { Turnstile } from "@/components/turnstile";
 
 import { AvailabilityBadge } from "@/components/availability-badge";
@@ -23,7 +25,27 @@ import type { CartLine, PlacedOrder, Quote } from "@/lib/erp";
 import { mediaHref } from "@/lib/media";
 import { formatPrice } from "@/lib/money";
 
-type Props = { tenant: string; shopName: string };
+/**
+ * What checkout knows about a signed-in shopper, and nothing more. Built by the
+ * cart page from the ERP's session, so every field is the ERP's, and `phone` in
+ * particular is the number the sign-in code was received on.
+ */
+export type CheckoutShopper = {
+  name: string | null;
+  phone: string;
+  /** From the shopper's most recent order — a suggestion, never a saved address. */
+  address: string | null;
+  landmark: string | null;
+};
+
+type Props = {
+  tenant: string;
+  shopName: string;
+  /** Null for a guest, on a shop that still takes guest orders. */
+  shopper: CheckoutShopper | null;
+  /** Where to send a shopper whose session the ERP has just refused. */
+  signInHref: string;
+};
 
 /**
  * Asks the server to price the cart. Deliberately free of React state so the
@@ -57,7 +79,7 @@ async function priceCart(
  * shopper added the item is reflected before they commit, and the total shown
  * is computed by the same code that will price the order.
  */
-export function CartView({ tenant, shopName }: Props) {
+export function CartView({ tenant, shopName, shopper, signInHref }: Props) {
   const { lines, setQuantity, remove, clear } = useCart(tenant);
 
   const [placed, setPlaced] = useState<PlacedOrder | null>(null);
@@ -97,7 +119,7 @@ export function CartView({ tenant, shopName }: Props) {
   const pricing = lines.length > 0 && current === null;
 
   if (placed) {
-    return <OrderPlaced tenant={tenant} order={placed} />;
+    return <OrderPlaced tenant={tenant} order={placed} signedIn={shopper !== null} />;
   }
 
   if (lines.length === 0) {
@@ -159,6 +181,8 @@ export function CartView({ tenant, shopName }: Props) {
 
         <Checkout
           tenant={tenant}
+          shopper={shopper}
+          signInHref={signInHref}
           disabled={pricing || !quote}
           onPlaced={(order) => {
             clear();
@@ -349,17 +373,38 @@ function Summary({
   );
 }
 
+/**
+ * The delivery form and the submit.
+ *
+ * For a signed-in shopper the fields start from the account: the name the shop
+ * has for them and the address and landmark from their last order, all of it
+ * editable, because a parcel can go somewhere new. The phone is not editable.
+ * It is the number the sign-in code was received on, and the ERP records that
+ * number for a signed-in order whatever the form sends — so offering a box to
+ * type another one into would be offering a choice that is not honoured. It is
+ * still sent, so a guest body and a signed-in body stay one shape.
+ *
+ * A 401 means the ERP no longer accepts the session. The shopper is sent to
+ * sign in and brought back here; the cart is in localStorage and is not
+ * touched, so nothing they chose is lost on the way.
+ */
 function Checkout({
   tenant,
+  shopper,
+  signInHref,
   lines,
   disabled,
   onPlaced,
 }: {
   tenant: string;
+  shopper: CheckoutShopper | null;
+  signInHref: string;
   lines: { slug: string; quantity: number }[];
   disabled: boolean;
   onPlaced: (order: PlacedOrder) => void;
 }) {
+  const router = useRouter();
+  const { refresh } = useShopper();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
@@ -367,6 +412,9 @@ function Checkout({
   // spent by then, and re-sending it would fail as a replay — which would look
   // to the shopper like their corrected address was rejected too.
   const [turnstileNonce, setTurnstileNonce] = useState(0);
+  // With a site key configured the ERP refuses an order without a token, so the
+  // button waits for one rather than inviting a submit that is certain to fail.
+  const needsToken = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
 
   return (
     <form
@@ -384,7 +432,7 @@ function Checkout({
               lines,
               contact: {
                 name: form.get("name"),
-                phone: form.get("phone"),
+                phone: shopper?.phone ?? form.get("phone"),
                 address: form.get("address"),
                 landmark: form.get("landmark"),
               },
@@ -393,6 +441,14 @@ function Checkout({
             }),
           });
           const body = (await response.json()) as { data?: PlacedOrder; error?: string };
+          if (response.status === 401) {
+            // The handler has already dropped the dead cookie. The shared
+            // shopper state is told too, so the header stops naming someone
+            // who is no longer signed in.
+            await refresh();
+            router.push(signInHref);
+            return;
+          }
           if (!response.ok || !body.data) {
             setError(body.error ?? "Could not place your order.");
             setTurnstileNonce((nonce) => nonce + 1);
@@ -411,18 +467,37 @@ function Checkout({
         Delivery details
       </Text>
 
-      <CheckoutField name="name" label="Your name" required autoComplete="name" />
-      <CheckoutField name="phone" label="Phone" required type="tel" autoComplete="tel" />
+      <CheckoutField
+        name="name"
+        label="Your name"
+        required
+        autoComplete="name"
+        defaultValue={shopper?.name ?? undefined}
+      />
+      {shopper ? (
+        <CheckoutField
+          name="phone"
+          label="Phone"
+          type="tel"
+          value={shopper.phone}
+          readOnly
+          hint="Verified with the code we sent. Sign out to order with another number."
+        />
+      ) : (
+        <CheckoutField name="phone" label="Phone" required type="tel" autoComplete="tel" />
+      )}
       <CheckoutField
         name="address"
         label="Delivery address"
         required
         autoComplete="street-address"
+        defaultValue={shopper?.address ?? undefined}
       />
       <CheckoutField
         name="landmark"
         label="Landmark"
         hint="A shop or crossing the rider will know."
+        defaultValue={shopper?.landmark ?? undefined}
       />
       <CheckoutField name="note" label="Anything the shop should know" />
 
@@ -433,7 +508,7 @@ function Checkout({
       <Button
         type="submit"
         className="self-start"
-        disabled={disabled}
+        disabled={disabled || (needsToken && !turnstileToken)}
         loading={submitting}
       >
         {submitting ? "Placing order…" : "Place order"}
@@ -462,6 +537,9 @@ function CheckoutField({
   type = "text",
   autoComplete,
   hint,
+  defaultValue,
+  value,
+  readOnly,
 }: {
   name: string;
   label: string;
@@ -469,6 +547,11 @@ function CheckoutField({
   type?: string;
   autoComplete?: string;
   hint?: string;
+  /** A starting point the shopper can change — the account's details. */
+  defaultValue?: string;
+  /** Fixed, with `readOnly`: shown and submitted, but not the shopper's to edit. */
+  value?: string;
+  readOnly?: boolean;
 }) {
   return (
     <Field id={`checkout-${name}`} label={label} required={required} hint={hint}>
@@ -479,13 +562,27 @@ function CheckoutField({
           type={type}
           required={required}
           autoComplete={autoComplete}
+          defaultValue={defaultValue}
+          value={value}
+          readOnly={readOnly}
+          // A variant rather than a plain override: `bg-surface` in the base
+          // classes would otherwise win or lose on stylesheet order alone.
+          className="read-only:bg-surface-subdued read-only:text-ink-subdued"
         />
       )}
     </Field>
   );
 }
 
-function OrderPlaced({ tenant, order }: { tenant: string; order: PlacedOrder }) {
+function OrderPlaced({
+  tenant,
+  order,
+  signedIn,
+}: {
+  tenant: string;
+  order: PlacedOrder;
+  signedIn: boolean;
+}) {
   return (
     <section className="flex flex-col gap-4">
       <Text as="h2" variant="displayMedium">
@@ -515,9 +612,21 @@ function OrderPlaced({ tenant, order }: { tenant: string; order: PlacedOrder }) 
             Track or cancel this order
           </Link>
         </p>
+        {/* A signed-in order is in the account's history as well, so the link
+            is no longer the only way back — but it is still the only way to
+            cancel, which the account pages cannot do yet. */}
         <p className="mt-1">
-          Save this link — it is the only way back to your order, and it is not sent
-          anywhere else.
+          {signedIn ? (
+            <>
+              It is also in{" "}
+              <Link href={`/${tenant}/account`} className="underline underline-offset-4">
+                your orders
+              </Link>
+              . Keep this link if you may want to cancel — cancelling happens there.
+            </>
+          ) : (
+            "Save this link — it is the only way back to your order, and it is not sent anywhere else."
+          )}
         </p>
       </Notice>
 
