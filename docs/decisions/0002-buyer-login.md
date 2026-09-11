@@ -1,6 +1,8 @@
 # 0002 — Buyer login: phone, one-time codes, and accounts beside the customer master
 
-Status: accepted
+Status: accepted — "What does not change" reversed in part by
+[`0003`](0003-signed-in-checkout.md), which makes signed-in checkout the
+default and moves the session cookie to `Path=/`
 Date: 2026-08-19
 
 ## What this decides

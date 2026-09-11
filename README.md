@@ -77,22 +77,49 @@ currently charges — the total displayed is never an input to anything.
 
 ## Buyer sessions
 
-Decision `docs/decisions/0002-buyer-login.md` has the reasoning; the rules this
+Decisions `docs/decisions/0002-buyer-login.md` and
+`docs/decisions/0003-signed-in-checkout.md` have the reasoning; the rules this
 app has to keep are short.
 
-A shopper signs in with a phone number and a one-time code. The ERP mints an
-opaque session token and keeps only its SHA-256; the token itself lives in an
-httpOnly, `SameSite=Lax` cookie scoped to `/{tenant}`, and travels to the ERP in
-`X-Shopper-Session` — never `Authorization`, which the edge gate reserves for
-staff JWTs. `src/lib/session.ts` is the only place the cookie's attributes are
-decided, and `/api/{tenant}/auth/verify-code` is the only place it is written.
+A shopper signs in with a one-time code sent to an email address — or, once
+the ERP has an SMS provider, a phone number. Which channels are offered is the
+shop's `signInWith`, the ones the ERP can deliver on right now; today that is
+email, through the ERP's Resend client. The ERP mints an opaque session token
+and keeps only its SHA-256; the token itself lives in an httpOnly,
+`SameSite=Lax` cookie named `sf_session_{tenant}` at `Path=/`, and travels to
+the ERP in `X-Shopper-Session` — never `Authorization`, which the edge gate
+reserves for staff JWTs. `src/lib/session.ts` is the only place the cookie's
+attributes are decided, and `/api/{tenant}/auth/verify-code` is the only place
+it is written.
 
 There is no challenge handle between the two steps. The ERP keeps one live code
-per phone number, so step two submits the number again alongside the digits —
-which is also what lets the send throttle count, since a resend updates that one
-row instead of creating a rival.
+per phone number or address, so step two submits it again alongside the digits
+— which is also what lets the send throttle count, since a resend updates that
+one row instead of creating a rival.
 
-Three rules go with it:
+### Signed-in checkout
+
+Each shop's `requireSignIn` — on by default — means only a signed-in shopper can
+fill a cart and check out. It is enforced three times, and only the last is the
+boundary: the product page offers "Sign in to buy" in place of "Add to cart";
+the cart page checks the session with the ERP and sends a shopper without one to
+`/{tenant}/sign-in?next=/{tenant}/cart`; and the ERP refuses `POST /order` with
+401 without a live session. The catalog itself stays public.
+
+Checkout is prefilled from the account — the name, and the address and landmark
+from the last order, all editable. A verified phone is shown read-only, because
+the ERP records it whatever the form says. An email-verified shopper still types
+a phone for the rider, which is recorded as contact and never used to match a
+customer; email and phone sign-ins are separate customers until a linking step
+exists.
+
+`?next=` is vetted by `src/lib/next-path.ts`: only a path on this shop gets
+through, and anything else lands on the account page.
+
+With `requireSignIn` on, **sign-in is a hard dependency for taking any order**:
+a shop whose ERP cannot send a code cannot sell, and the sign-in page says so.
+
+Four rules go with it:
 
 - **Session calls never cache.** Next's data cache keys on the URL and does not
   vary on headers, so a cached order history would be replayed to the next
@@ -100,16 +127,23 @@ Three rules go with it:
   uses `cache: "no-store"` and never `next: { revalidate }`.
 - **No `cookies()` in `src/app/[tenant]/layout.tsx`.** It is a request-time API,
   and reading it there would make every page beneath `/{tenant}` render per
-  request to decide one header link. The account slot is a client island
-  (`src/components/account-link.tsx`) that asks `/api/{tenant}/me` after
-  hydration instead.
+  request to decide one header link. `src/components/shopper-provider.tsx` asks
+  `/api/{tenant}/me` once after hydration and shares the answer with the header
+  and the add to cart button.
 - **Every mutating route handler checks the origin.** A cookie is an ambient
   credential, so `POST` handlers call `isSameOrigin` from
   `src/lib/same-origin.ts` first. Next does this for Server Actions on its own
   and not for route handlers.
+- **Production does not start without a Turnstile site key.**
+  `src/instrumentation.ts` refuses at server start (not at build, so CI still
+  builds without it). `NEXT_PUBLIC_` values are inlined at build time, so the
+  key must be present when building the image that is deployed. The ERP side
+  is `TURNSTILE_SECRET_KEY` with `TURNSTILE_REQUIRED=true`.
 
-Guest checkout is untouched: no session header, no account, a status token
-issued as before, and every existing `/{tenant}/order/{token}` link still works.
+A shop that turns `requireSignIn` off keeps guest checkout as it was: no session
+header, no account, a status token issued as before. Every existing
+`/{tenant}/order/{token}` link still works, and signed-in orders get a status
+token too.
 
 ## Status
 
@@ -123,26 +157,23 @@ Every public `/storefront/*` endpoint the ERP exposes is consumed here:
 | `GET /media/{fileId}` | Proxied through `/{tenant}/media/{fileId}` |
 | `GET /sitemap` | `/{tenant}/sitemap.xml` |
 | `POST /quote` | Every figure the cart shows |
-| `POST /order` | Checkout |
+| `POST /order` | Checkout, carrying `X-Shopper-Session` |
 | `GET /order/{token}` | `/{tenant}/order/{token}` |
 | `POST /order/{token}/cancel` | Self-cancel while the order is still a draft |
-| `POST /auth/request-code` | `/{tenant}/sign-in`, step one |
+| `POST /auth/request-code` | `/{tenant}/sign-in`, step one — an email or a phone |
 | `POST /auth/verify` | `/{tenant}/sign-in`, step two — the only place the cookie is written |
 | `POST /auth/logout` | Sign out, which revokes at the ERP before clearing the cookie |
-| `GET /auth/session` | The header's account slot, via `/api/{tenant}/me` |
+| `GET /auth/session` | The header, add to cart and checkout prefill, via `/api/{tenant}/me` and the cart page |
 | `GET /account/orders` | `/{tenant}/account` — order history |
 | `GET /account/orders/{orderNumber}` | `/{tenant}/account/orders/{orderNumber}` |
 
 Orders land in the ERP as draft sales orders awaiting staff approval; payment is
 on delivery.
 
-The six buyer-login endpoints landed on the ERP's `feat/storefront` branch, so
-their shapes come from the generated types like everything else. Point
-`ERP_OPENAPI` at that checkout until it merges:
-
-```bash
-ERP_OPENAPI=../erp-server/server/openapi.yaml npm run types:generate
-```
+Signed-in checkout (`requireSignIn`, `signInWith`, email codes, the verified
+`email` and last-order `address` on the session) comes from the ERP's
+`feat/storefront-signed-in-checkout` branch; the default `../erp` checkout must
+be on it for `npm run types:check` to pass until it merges.
 
 The shop's chrome — name, search box, cart count, footer — lives in
 `src/app/[tenant]/layout.tsx`, which is also where the shop-exists check
@@ -161,6 +192,9 @@ different from a shop that is closed.
   and offers no `?sort=`, so there is nothing to render a control for yet.
 - **`sitemap.truncated` is ignored.** The ERP caps the slug list; a shop large
   enough to hit that cap needs a paginated sitemap index here.
+- **Email and phone sign-ins are separate customers.** Codes go by email until
+  an SMS provider is chosen; when one is, a shopper who used both has two
+  accounts until a step that proves both in one session exists. Decision `0003`.
 - **A signed-in buyer cannot cancel from their account.** Self-cancel hangs off
   the status token, and an order reached by its number does not carry one, so
   `/{tenant}/account/orders/{orderNumber}` is read-only. The token link still
