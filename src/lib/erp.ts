@@ -356,6 +356,16 @@ export async function fetchQuote(
   );
 }
 
+/**
+ * Writes the order, on behalf of the signed-in shopper when there is one.
+ *
+ * Goes through `privatePost` because it can carry a session, and so follows
+ * that block's rules: never cached, and the session in `X-Shopper-Session`.
+ * With a session the ERP stamps the buyer's account on the order and records
+ * the phone the code was received on, whatever `contact.phone` says. On a shop
+ * that requires sign-in, a missing or lapsed session is a 401 thrown from here,
+ * which the order route turns into "sign in again".
+ */
 export async function placeOrder(
   tenantCode: string,
   payload: {
@@ -368,12 +378,12 @@ export async function placeOrder(
      */
     turnstileToken?: string;
   },
-  shopperIp?: string,
+  options: { session?: string; shopperIp?: string } = {},
 ): Promise<PlacedOrder | null> {
-  return post<PlacedOrder>(
+  return privatePost<PlacedOrder>(
     `/storefront/${encodeURIComponent(tenantCode)}/order`,
     payload,
-    shopperIp,
+    options,
   );
 }
 
@@ -553,9 +563,9 @@ async function privateGet<T>(
 /**
  * A write, with or without a session.
  *
- * Separate from `post` rather than an extra parameter on it: the guest paths
- * are the ones carrying real money today, and leaving their call site untouched
- * means this change cannot alter them by accident.
+ * Separate from `post` rather than an extra parameter on it, so that the quote
+ * — which never carries a session — cannot start sending one by accident.
+ * Placing an order moved here when checkout became session-aware.
  *
  * The ERP's own message is carried out on every rejection, not only on 400.
  * Signing in fails with a 401 that says which of "wrong", "expired" and "asked
