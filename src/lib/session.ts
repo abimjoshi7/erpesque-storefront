@@ -18,21 +18,28 @@ import { cookies } from "next/headers";
 
 /**
  * Scoped per tenant, mirroring the `KEY_PREFIX` in `lib/cart.ts`. Two shops
- * open in one browser must not see each other's session, and the name is the
- * first half of that — `Path` below is the other.
+ * open in one browser must not see each other's session, and since `Path` is
+ * the whole origin (see below), the name is what keeps them apart.
  */
 export function sessionCookieName(tenant: string): string {
   return `sf_session_${tenant}`;
 }
 
 /**
- * Fourteen days, matching the ERP's idle window. The cookie expiring before the
+ * Thirty days, matching the idle window the ERP shipped (under a ninety-day
+ * absolute cap that the ERP enforces on its own). The cookie expiring before the
  * session does would sign a shopper out while the server still held a live
  * session; the reverse leaves a cookie that fails once and is then cleared.
  * Neither is harmful, but they should agree, and this is the value to change if
  * the ERP's window moves.
+ *
+ * The cookie's `Max-Age` is only refreshed when it is written, at sign-in,
+ * while the ERP slides its window on every authenticated request. A shopper
+ * who keeps browsing therefore outlives the cookie rather than the other way
+ * round, and meets the sign-in page thirty days after they last signed in.
+ * That is the harmless direction, and it is now the only mismatch left.
  */
-const IDLE_TTL_SECONDS = 14 * 24 * 60 * 60;
+const IDLE_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 /**
  * `Secure` is conditional because development runs on `http://localhost:3001`,
@@ -42,18 +49,28 @@ const IDLE_TTL_SECONDS = 14 * 24 * 60 * 60;
 const secure = process.env.NODE_ENV === "production";
 
 /**
- * `Path` is scoped to the shop rather than the origin, so a request to
- * `/{other-tenant}` does not even carry this shop's token. It is hygiene, not
- * the boundary — the real one is that the ERP binds every session lookup to the
- * tenant it resolved from the URL, so a token from one shop presented to
- * another simply misses.
+ * `Path=/`, and the tenant lives in the cookie's name instead.
+ *
+ * The first cut scoped `Path` to `/{tenant}`, so that a request to another
+ * shop's pages would not carry this shop's token. It also meant the browser
+ * never sent the cookie to `/api/{tenant}/…`, which is where every route
+ * handler lives — `/api/nsbs/me` does not sit beneath `/nsbs` — so the header
+ * always read "Sign in", sign-out never revoked anything at the ERP, and an
+ * order could not carry a session at all. Pages under `/{tenant}` saw the
+ * cookie, which is why the account page worked and hid the fault.
+ *
+ * Nothing is lost by widening it. Two shops open in one browser still cannot
+ * see each other's session, because the name differs per tenant. And the path
+ * was always hygiene rather than the boundary: the ERP binds every session
+ * lookup to the tenant it resolved from the URL, so a token from one shop
+ * presented to another simply misses.
  */
-function cookieOptions(tenant: string) {
+function cookieOptions() {
   return {
     httpOnly: true,
     secure,
     sameSite: "lax" as const,
-    path: `/${tenant}`,
+    path: "/",
   };
 }
 
@@ -72,7 +89,7 @@ export async function readSession(tenant: string): Promise<string | undefined> {
 export async function setSession(tenant: string, token: string): Promise<void> {
   const store = await cookies();
   store.set(sessionCookieName(tenant), token, {
-    ...cookieOptions(tenant),
+    ...cookieOptions(),
     maxAge: IDLE_TTL_SECONDS,
   });
 }
@@ -86,7 +103,7 @@ export async function setSession(tenant: string, token: string): Promise<void> {
 export async function clearSession(tenant: string): Promise<void> {
   const store = await cookies();
   store.set(sessionCookieName(tenant), "", {
-    ...cookieOptions(tenant),
+    ...cookieOptions(),
     maxAge: 0,
   });
 }
