@@ -281,6 +281,38 @@ export async function fetchShop(tenantCode: string): Promise<Tenant | null> {
 }
 
 /**
+ * The shop as it is right now, for a page that makes a decision with it.
+ *
+ * `fetchShop` is up to an hour old, which is fine for a name in a header and
+ * wrong for `requireSignIn` and `signInWith`: a merchant who turns sign-in off
+ * would see their cart keep sending guests to a sign-in page for an hour, and
+ * one who turns it on would see guests offered a checkout the ERP then refuses.
+ *
+ * `no-store`, not a shorter revalidate. Only per-request pages call this — the
+ * cart, sign-in — which already render per shopper and read a cookie, so there
+ * is no page cache for a live read to spoil. A one-minute revalidate would
+ * only shrink the window in which the storefront and the ERP disagree, not
+ * close it. The cost is one facets query per cart view by a signed-out shopper,
+ * which is the cheapest read the ERP exposes that carries the tenant.
+ *
+ * A `no-store` fetch neither reads nor writes the data cache, so the hour-long
+ * entry the layout reads is left exactly as it was.
+ */
+export async function fetchShopLive(tenantCode: string): Promise<Tenant | null> {
+  const path = `/storefront/${encodeURIComponent(tenantCode)}/facets`;
+  const response = await fetch(`${baseUrl()}${path}`, {
+    headers: { Accept: "application/json", ...authHeaders() },
+    cache: "no-store",
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ErpError(response.status, path);
+
+  const body = (await response.json()) as { data: Facets };
+  return body.data.tenant;
+}
+
+/**
  * Fetches a product photograph's raw bytes.
  *
  * Returns the `Response` rather than a parsed body: the media route handler

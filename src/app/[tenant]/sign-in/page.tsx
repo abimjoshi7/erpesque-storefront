@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 
 import { Notice, Text } from "@/design-system";
-import { fetchShop, fetchShopperSession, isUnauthorized } from "@/lib/erp";
+import { fetchShopLive, fetchShopperSession, isUnauthorized } from "@/lib/erp";
 import { safeNext } from "@/lib/next-path";
 import { readSession } from "@/lib/session";
 
@@ -48,7 +48,11 @@ export default async function SignInPage({
   const { next: nextParam } = await searchParams;
   const next = safeNext(tenant, nextParam);
 
-  const shop = await fetchShop(tenant);
+  // Live rather than the layout's hour-old tenant: `signInWith` is what decides
+  // whether a form is drawn at all, and a sender the ERP gained or lost should
+  // show here on the next visit, not an hour later. The page is per-request
+  // already, so there is no cache for this to spoil.
+  const shop = await fetchShopLive(tenant);
   if (!shop) notFound();
 
   const session = await readSession(tenant);

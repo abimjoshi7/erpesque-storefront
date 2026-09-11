@@ -23,8 +23,13 @@ import { fetchShop } from "@/lib/erp";
  * `ShopperProvider` wraps everything so the header and the add to cart button
  * share one answer to "who is signed in". It is a client component that asks
  * after hydration; this layout itself reads no cookie, and must not — see
- * decision 0002. What it does pass down is the shop's `requireSignIn`, which
- * comes from the `fetchShop` call already made here and costs nothing extra.
+ * decision 0002.
+ *
+ * Nothing here passes down `requireSignIn`. The tenant this layout holds is up
+ * to an hour old (`fetchShop` rides the facets cache), which is fine for a name
+ * and wrong for a rule a merchant expects to take effect when they flip it.
+ * Each place that acts on the flag reads a fresher copy: the product page from
+ * its own one-minute read, the cart and sign-in pages live.
  */
 export default async function ShopLayout({ children, params }: LayoutProps<"/[tenant]">) {
   const { tenant } = await params;
@@ -32,7 +37,7 @@ export default async function ShopLayout({ children, params }: LayoutProps<"/[te
   if (!shop) notFound();
 
   return (
-    <ShopperProvider tenant={tenant} requireSignIn={shop.requireSignIn}>
+    <ShopperProvider tenant={tenant}>
       <div className="flex min-h-full flex-1 flex-col">
         <ShopHeader tenant={tenant} shopName={shop.name} />
         <div className="flex-1">{children}</div>

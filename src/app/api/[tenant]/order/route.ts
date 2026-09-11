@@ -2,13 +2,7 @@ import { NextResponse } from "next/server";
 
 import { shopperIp } from "@/lib/client-ip";
 import { errorResponse, normalizeLines } from "@/lib/cart-request";
-import {
-  ErpError,
-  fetchShop,
-  placeOrder,
-  type CartLine,
-  type Contact,
-} from "@/lib/erp";
+import { ErpError, placeOrder, type CartLine, type Contact } from "@/lib/erp";
 import { forbiddenResponse, isSameOrigin } from "@/lib/same-origin";
 import { clearSession, readSession } from "@/lib/session";
 
@@ -34,10 +28,15 @@ const SIGN_IN_AGAIN = "Your session ended — sign in again to place your order.
  * to the buyer's account, and where the shopper signed in by phone it records
  * that verified number in place of whatever was typed (an email sign-in keeps
  * the typed number, as one for the rider to ring). On a shop that requires
- * sign-in, the ERP refuses an order without a live session, and so does this
- * handler — early, when there is no cookie at all, so a signed-out request
- * never reaches the ERP. That early check is a courtesy to the ERP and not the boundary; the
- * ERP's own 401 is, and it also covers a cookie that exists but has lapsed.
+ * sign-in, the ERP refuses an order without a live session with a 401, and
+ * that 401 is the only place the rule is decided.
+ *
+ * This handler used to refuse first when there was no cookie, reading the
+ * shop's `requireSignIn` to spare the ERP a round trip. That read was the
+ * layout's hour-cached tenant, so a merchant who turned sign-in off kept having
+ * guest orders refused here for up to an hour while the ERP would have taken
+ * them. A second copy of a rule is a copy that can be stale; the round trip is
+ * cheaper than the lost orders.
  */
 export async function POST(
   request: Request,
@@ -89,16 +88,6 @@ export async function POST(
 
   const session = await readSession(tenant);
 
-  if (!session) {
-    // Deduped with, and cached like, the layout's own call, so this costs the
-    // ERP nothing on the common path. Only asked when there is no cookie: with
-    // one, the ERP answers the same question as part of placing the order.
-    const shop = await fetchShop(tenant).catch(() => null);
-    if (shop?.requireSignIn) {
-      return NextResponse.json({ error: SIGN_IN_FIRST }, { status: 401 });
-    }
-  }
-
   try {
     const order = await placeOrder(
       tenant,
@@ -111,10 +100,11 @@ export async function POST(
     return NextResponse.json({ data: order });
   } catch (error) {
     if (error instanceof ErpError && error.status === 401) {
-      // The ERP only refuses a session on a shop that requires one — elsewhere
-      // a lapsed session places a guest order — so this cookie is worthless
-      // now. Dropping it here spares the next page a lookup that would fail.
-      await clearSession(tenant);
+      // The ERP only answers 401 on a shop that requires sign-in — elsewhere a
+      // lapsed session places a guest order. With a cookie sent, that cookie is
+      // worthless now, and dropping it spares the next page a lookup that would
+      // fail. Without one there is nothing to drop.
+      if (session) await clearSession(tenant);
       return NextResponse.json(
         { error: session ? SIGN_IN_AGAIN : SIGN_IN_FIRST },
         { status: 401 },

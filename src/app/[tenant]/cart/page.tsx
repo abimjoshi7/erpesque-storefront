@@ -3,7 +3,13 @@ import type { Metadata } from "next";
 
 import { CartView, type CheckoutShopper } from "@/app/[tenant]/cart/cart-view";
 import { Text } from "@/design-system";
-import { fetchShop, fetchShopperSession, isUnauthorized, type ShopperSession } from "@/lib/erp";
+import {
+  fetchShop,
+  fetchShopLive,
+  fetchShopperSession,
+  isUnauthorized,
+  type ShopperSession,
+} from "@/lib/erp";
 import { signInHref } from "@/lib/next-path";
 import { readSession } from "@/lib/session";
 
@@ -32,6 +38,14 @@ export const metadata: Metadata = {
  *
  * Reading the cookie makes this page render per request, which it would anyway
  * — nothing on it is the same for two shoppers.
+ *
+ * `requireSignIn` is read live, never from the layout's hour-cached tenant: a
+ * stale "on" bounces guests to sign-in on a shop that has reopened guest
+ * checkout, and a stale "off" offers them a checkout the ERP will refuse. With
+ * a live session no read is needed — a signed-in shopper may check out either
+ * way. Without one, `fetchShopLive` makes one uncached read; see there for why
+ * `no-store` rather than a short revalidate. The layout itself stays free of
+ * request-time reads.
  */
 export default async function CartPage({ params }: PageProps) {
   const { tenant } = await params;
@@ -56,10 +70,17 @@ export default async function CartPage({ params }: PageProps) {
     }
   }
 
+  // A live read's `null` (a shop closed since the layout's cached answer) falls
+  // back to that answer rather than opening a second not-found path here — the
+  // layout decides whether this shop exists, and the ERP refuses the order.
+  const requireSignIn = session
+    ? false
+    : ((await fetchShopLive(tenant))?.requireSignIn ?? shop.requireSignIn);
+
   // Outside the `try`: `redirect` works by throwing, and a catch around it
   // would swallow the navigation. The cookie is left for the next route handler
   // to clear — a page cannot write one while it renders.
-  if (shop.requireSignIn && !session) redirect(signIn);
+  if (requireSignIn) redirect(signIn);
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">

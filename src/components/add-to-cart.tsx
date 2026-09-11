@@ -28,6 +28,7 @@ export function AddToCart({
   title,
   disabled,
   outOfStock,
+  requireSignIn,
 }: {
   tenant: string;
   slug: string;
@@ -40,9 +41,16 @@ export function AddToCart({
    * has sold out. A shopper can act on the second by coming back.
    */
   outOfStock?: boolean;
+  /**
+   * The shop's `requireSignIn`, from the product page's own `fetchProduct` —
+   * a minute old at most — rather than the layout's hour-old tenant, so a
+   * merchant's change reaches this button in about the time a price change
+   * does. Still only a convenience; the ERP decides at the order.
+   */
+  requireSignIn: boolean;
 }) {
   const { add } = useCart(tenant);
-  const { session, requireSignIn } = useShopper();
+  const { session } = useShopper();
   const pathname = usePathname();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(0);

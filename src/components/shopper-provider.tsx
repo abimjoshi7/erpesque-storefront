@@ -32,12 +32,6 @@ type ShopperState = {
    * "Sign in" that becomes a name a moment later.
    */
   session: ShopperSession | null | undefined;
-  /**
-   * The shop's `requireSignIn`, from the same `fetchShop` the layout already
-   * makes. A convenience for deciding what to render; the order route and the
-   * ERP enforce it whatever this says.
-   */
-  requireSignIn: boolean;
   /** Ask again — after signing in or out, or after the ERP refused a session. */
   refresh: () => Promise<void>;
 };
@@ -58,11 +52,9 @@ async function fetchMe(tenant: string): Promise<ShopperSession | null> {
 
 export function ShopperProvider({
   tenant,
-  requireSignIn,
   children,
 }: {
   tenant: string;
-  requireSignIn: boolean;
   children: React.ReactNode;
 }) {
   const [session, setSession] = useState<ShopperSession | null | undefined>(undefined);
@@ -84,7 +76,7 @@ export function ShopperProvider({
   }, [tenant]);
 
   return (
-    <ShopperContext value={{ session, requireSignIn, refresh }}>{children}</ShopperContext>
+    <ShopperContext value={{ session, refresh }}>{children}</ShopperContext>
   );
 }
 

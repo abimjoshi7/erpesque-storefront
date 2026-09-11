@@ -139,6 +139,7 @@ export default async function ProductPage({ params }: PageProps) {
             title={product.title}
             disabled={unpriced}
             outOfStock={outOfStock}
+            requireSignIn={shop.requireSignIn}
           />
         </div>
       </article>
