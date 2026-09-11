@@ -10948,6 +10948,20 @@ export interface paths {
                 };
                 404: components["responses"]["NotFound"];
                 429: components["responses"]["TooManyRequests"];
+                /**
+                 * @description The channel named is one this server cannot send codes on (no SMS
+                 *     provider for `phone`, no email sender for `email`) - the same
+                 *     answer `request-code` gives, rather than the 401 a wrong code gets,
+                 *     which would send the shopper to ask for a code that cannot be sent.
+                 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
