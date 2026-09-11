@@ -59,11 +59,56 @@ the caller a leaked key creates. The ERP check costs one flag read inside a
 transaction that is already open, and it makes the storefront's checks what
 they should be: courtesy, not the boundary.
 
-The two layers cannot drift apart. The storefront never decides the rule
-itself. It reads `requireSignIn` from the same tenant object the ERP enforces
-against. The order route answers 401 early only when there is no cookie at all,
-to spare the ERP a round trip. When there is a cookie, the ERP's own 401 decides
-whether the session is still live.
+The storefront never decides the rule, and the order route does not check it at
+all. It forwards the session when there is one and relays the ERP's 401: a
+cookie that was sent is cleared, and the shopper is told to sign in again;
+with no cookie, they are told to sign in.
+
+The first cut had the order route answer 401 itself when there was no cookie,
+to spare the ERP a round trip. End-to-end testing showed why that was wrong.
+The copy of `requireSignIn` it read was stale, and a stale copy of a rule is a
+second rule. See below.
+
+## How fresh the flag is, where
+
+Every storefront response carries the tenant, but at different ages.
+`fetchShop`, which the shop layout uses for its chrome, rides the facets cache
+and can be up to an hour old. That is fine for a shop's name. It is wrong for a
+rule a merchant expects to take effect when they flip it. With an hour-old
+flag, turning sign-in **off** kept guests bounced to sign-in and their orders
+refused, while the ERP would have accepted them. Turning it **on** kept guests
+offered a checkout the ERP then refused. The second is confusing, not a bypass.
+
+So nothing that acts on the flag reads the layout's copy:
+
+| Where | Reads | Age |
+| --- | --- | --- |
+| `POST /api/{tenant}/order` | nothing — the ERP's 401 decides | live |
+| Cart page (no live session) | `fetchShopLive`, `cache: "no-store"` | live |
+| Cart page (live session) | not needed — signed in may check out either way | — |
+| Sign-in page (copy and `signInWith`) | `fetchShopLive` | live |
+| Product page's "Sign in to buy" | the tenant on its own `fetchProduct` | up to 60 s |
+
+`no-store` rather than a shorter revalidate on the cart and sign-in pages,
+because both already render per request (they read the cookie), so there is no
+page cache to protect. A one-minute revalidate would narrow the window in which
+the storefront and the ERP disagree without closing it. The cost is one facets
+read, the lightest ERP call that carries the tenant, per cart view by a shopper
+without a session.
+
+The product page's minute of lag is accepted. It is the same lag every price on
+that page already has, and the worst case is one click that lands on the cart
+page, which reads the flag live and does the right thing. The layout stays free
+of request-time reads, as decision `0002` requires.
+
+**The cart to sign-in redirect is a streamed one, not a 307.** `cart/loading.tsx`
+starts streaming before the page decides, so `redirect()` arrives as a client
+navigation injected into a 200. We considered a Next `proxy` for a real 307 and
+did not build it. A proxy can see that the cookie is missing, but not whether
+the shop requires sign-in: that takes an ERP read, and a proxy that makes one on
+every cart request moves the cost without removing it. With the flag off by
+default, a missing cookie usually means a guest who should see checkout. The
+streamed redirect is correct, just not a 3xx.
 
 ## What "verified" means today: an email address, not a phone
 

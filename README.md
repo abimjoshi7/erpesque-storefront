@@ -107,6 +107,12 @@ the cart page checks the session with the ERP and sends a shopper without one to
 `/{tenant}/sign-in?next=/{tenant}/cart`; and the ERP refuses `POST /order` with
 401 without a live session. The catalog itself stays public.
 
+The flag is never read from the layout's tenant, which can be up to an hour
+old. The order route doesn't read it at all; it forwards the session and
+relays the ERP's 401. The cart and sign-in pages read it live
+(`fetchShopLive`), and "Sign in to buy" reads it from the product page's own
+one-minute read. Decision `0003` has the table.
+
 Checkout is prefilled from the account — the name, and the address and landmark
 from the last order, all editable. A verified phone is shown read-only, because
 the ERP records it whatever the form says. An email-verified shopper still types
