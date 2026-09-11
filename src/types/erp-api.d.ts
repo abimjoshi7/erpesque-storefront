@@ -11306,7 +11306,8 @@ export interface paths {
                          *     out. Unlike every other field here, omitting it leaves the
                          *     saved value alone rather than resetting it: a settings page
                          *     written before the flag existed must not reopen guest
-                         *     checkout by saving a delivery fee. New shops start at true.
+                         *     checkout by saving a delivery fee. Off until a shop turns
+                         *     it on: signed-in checkout is opt-in per shop.
                          */
                         requireSignIn?: boolean;
                     };
@@ -13859,7 +13860,8 @@ export interface components {
             /**
              * @description Whether only signed-in shoppers may fill a cart and check out.
              *     Published to shoppers as `StorefrontTenant.requireSignIn`, and
-             *     enforced by `POST /storefront/{tenantCode}/order`.
+             *     enforced by `POST /storefront/{tenantCode}/order`. False unless the
+             *     shop has turned it on - signed-in checkout is opt-in per shop.
              */
             requireSignIn?: boolean;
         };
@@ -14174,9 +14176,11 @@ export interface components {
             code: string;
             /**
              * @description True when only signed-in shoppers may fill a cart and check out.
-             *     The storefront uses it to decide whether to send a shopper to
-             *     sign-in; `POST /order` enforces it independently with 401, so a
-             *     client that ignores it gains nothing.
+             *     False unless the merchant has turned it on: signed-in checkout is
+             *     opt-in per shop, and a shop that has not opted in takes guest
+             *     orders exactly as it always has. The storefront uses it to decide
+             *     whether to send a shopper to sign-in; `POST /order` enforces it
+             *     independently with 401, so a client that ignores it gains nothing.
              */
             requireSignIn: boolean;
             /**

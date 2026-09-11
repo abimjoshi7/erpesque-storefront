@@ -99,8 +99,9 @@ one row instead of creating a rival.
 
 ### Signed-in checkout
 
-Each shop's `requireSignIn` — on by default — means only a signed-in shopper can
-fill a cart and check out. It is enforced three times, and only the last is the
+Signed-in checkout is opt-in per shop. A shop whose merchant turns
+`requireSignIn` on (it is off by default, existing shops included) accepts only
+signed-in shoppers at the cart and at checkout. It is enforced three times, and only the last is the
 boundary: the product page offers "Sign in to buy" in place of "Add to cart";
 the cart page checks the session with the ERP and sends a shopper without one to
 `/{tenant}/sign-in?next=/{tenant}/cart`; and the ERP refuses `POST /order` with
@@ -140,8 +141,8 @@ Four rules go with it:
   key must be present when building the image that is deployed. The ERP side
   is `TURNSTILE_SECRET_KEY` with `TURNSTILE_REQUIRED=true`.
 
-A shop that turns `requireSignIn` off keeps guest checkout as it was: no session
-header, no account, a status token issued as before. Every existing
+Every shop that has not turned `requireSignIn` on keeps guest checkout as it
+was: no session header, no account, a status token issued as before. Every existing
 `/{tenant}/order/{token}` link still works, and signed-in orders get a status
 token too.
 

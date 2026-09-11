@@ -1,4 +1,4 @@
-# 0003 — Signed-in checkout: only verified customers fill a cart and order
+# 0003 — Signed-in checkout: a shop can require verified customers
 
 Status: accepted
 Date: 2026-09-11
@@ -7,8 +7,9 @@ Date: 2026-09-11
 
 Decision `0002` made buyer login additive. Its "What does not change" section
 promised that guest checkout stays exactly as it was: no session header, contact
-typed in, a status token issued. This document reverses that promise for any
-shop that asks for it. By default every shop now does.
+typed in, a status token issued. This document lets a shop opt out of that
+promise. It is opt-in per shop: a shop that has not turned it on keeps guest
+checkout exactly as `0002` left it.
 
 The shop owner's requirement is that only a valid customer can shop, and that
 every order is an authentic transaction. Read literally, that means an order
@@ -19,10 +20,11 @@ delivery, and by then the rider's time was already committed.
 
 The short version:
 
-- Each shop has a `requireSignIn` flag. It defaults to on, and existing shops
-  are included. The ERP stores it (`tenant_preferences.storefront_require_sign_in`,
-  migration 136) and publishes it on every `StorefrontTenant`. Merchants can turn
-  it off from the shop settings page.
+- Each shop has a `requireSignIn` flag. It defaults to off, existing shops
+  included, so nothing changes for a shop until its merchant turns it on from the
+  shop settings page. The ERP stores it
+  (`tenant_preferences.storefront_require_sign_in`, migration 136) and publishes
+  it on every `StorefrontTenant`.
 - Where it is on, a shopper must sign in with a one-time code before they can
   fill a cart or check out.
 - It is enforced in three places, and only the last is the boundary. The
@@ -67,8 +69,8 @@ whether the session is still live.
 
 Decision `0002` made the canonical phone the identity, with a code sent by SMS.
 No SMS provider has been chosen. `request-code` answers 503 when asked for a
-channel the server cannot deliver on. With signed-in checkout on by default,
-that would mean no shop could take any order at all.
+channel the server cannot deliver on. A shop that turned signed-in checkout on
+would then be unable to take any order at all.
 
 So for now codes go by email, through the ERP's existing Resend client
 (`RESEND_API_KEY` and a verified `EMAIL_FROM_ADDRESS`). The tenant object
@@ -163,9 +165,9 @@ the ERP shipped.
 
 ## What does not change
 
-- Shops that turn `requireSignIn` off get checkout exactly as `0002` left it.
-  A session is optional: presenting one bills the account, and a stale one
-  places a guest order.
+- Shops that have not turned `requireSignIn` on, which is every shop until its
+  merchant does, get checkout exactly as `0002` left it. A session is optional:
+  presenting one bills the account, and a stale one places a guest order.
 - Every existing `/{tenant}/order/{token}` link still works. Signed-in orders
   still receive a status token, and it is still the only way to cancel. The
   account pages cannot cancel yet.
@@ -174,17 +176,21 @@ the ERP shipped.
 
 ## Costs, stated plainly
 
-- **Sign-in is now a hard dependency for taking any order.** Where
-  `requireSignIn` is on, an email outage, a Resend key that has lapsed, or a
+- **In a shop that opts in, sign-in is a hard dependency for taking any
+  order.** Where `requireSignIn` is on, an email outage, a Resend key that has lapsed, or a
   server with no sender configured means the shop takes no orders at all.
   `/storefront-admin/readiness` names that state for the merchant. Nothing turns
   the flag off automatically. Quietly reopening guest checkout is exactly the
   decision the flag leaves with the merchant.
-- **Every first order now costs a message** and an inbox round trip before it
-  can be placed. The 30-day sliding session keeps repeat sign-ins rare.
-- **The default-on migration changes live shops.** That is intended, since it
-  is what the owner asked for. But a merchant who relied on guest checkout
-  will see it close on deploy.
+- **In such a shop, every first order costs a message** and an inbox round
+  trip before it can be placed. The 30-day sliding session keeps repeat
+  sign-ins rare.
+- **Opt-in means a shop is only as authentic as its merchant chooses.** An
+  earlier draft of this decision turned the flag on for every shop, existing
+  ones included. It was changed to off before shipping: turning it on for a
+  live shop closes guest checkout on deploy, and on a server that cannot yet
+  send codes it would close the shop outright. Each merchant turns it on once
+  they know sign-in works for them.
 
 ## Open questions
 
