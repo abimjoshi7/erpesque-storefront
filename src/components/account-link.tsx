@@ -38,7 +38,9 @@ export function AccountLink({ tenant }: { tenant: string }) {
       href={`/${tenant}/account`}
       className="text-body-sm font-semibold text-ink hover:text-ink-strong"
     >
-      {session.shopper.name ?? "Your orders"}
+      {/* Whichever identity the shopper proved — a phone, or for an email
+          sign-in the address — when the shop has no name for them yet. */}
+      {session.shopper.name ?? session.shopper.phone ?? session.shopper.email ?? "Your orders"}
     </Link>
   ) : (
     <Link

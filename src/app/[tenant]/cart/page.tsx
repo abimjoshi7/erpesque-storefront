@@ -85,7 +85,8 @@ export default async function CartPage({ params }: PageProps) {
 function checkoutShopper(session: ShopperSession): CheckoutShopper {
   return {
     name: session.shopper.name ?? null,
-    phone: session.shopper.phone,
+    phone: session.shopper.phone ?? null,
+    email: session.shopper.email ?? null,
     address: session.shopper.address ?? null,
     landmark: session.shopper.landmark ?? null,
   };

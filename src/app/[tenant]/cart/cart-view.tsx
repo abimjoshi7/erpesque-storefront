@@ -27,12 +27,16 @@ import { formatPrice } from "@/lib/money";
 
 /**
  * What checkout knows about a signed-in shopper, and nothing more. Built by the
- * cart page from the ERP's session, so every field is the ERP's, and `phone` in
- * particular is the number the sign-in code was received on.
+ * cart page from the ERP's session, so every field is the ERP's.
+ *
+ * `phone` and `email` are *verified* identities — the one the sign-in code was
+ * received on — and never something merely typed. A shopper who signed in by
+ * email has no verified phone, so `phone` is null and checkout asks for one.
  */
 export type CheckoutShopper = {
   name: string | null;
-  phone: string;
+  phone: string | null;
+  email: string | null;
   /** From the shopper's most recent order — a suggestion, never a saved address. */
   address: string | null;
   landmark: string | null;
@@ -378,11 +382,16 @@ function Summary({
  *
  * For a signed-in shopper the fields start from the account: the name the shop
  * has for them and the address and landmark from their last order, all of it
- * editable, because a parcel can go somewhere new. The phone is not editable.
- * It is the number the sign-in code was received on, and the ERP records that
- * number for a signed-in order whatever the form sends — so offering a box to
- * type another one into would be offering a choice that is not honoured. It is
- * still sent, so a guest body and a signed-in body stay one shape.
+ * editable, because a parcel can go somewhere new.
+ *
+ * A verified phone is not editable. It is the number the sign-in code was
+ * received on, and the ERP records that number for a signed-in order whatever
+ * the form sends — so offering a box to type another one into would be offering
+ * a choice that is not honoured. It is still sent, so a guest body and a
+ * signed-in body stay one shape. A shopper who signed in by email has no
+ * verified phone, and the rider still needs one to call, so for them the phone
+ * is an ordinary required field and their verified address is shown instead,
+ * read-only, as the identity the order is placed under.
  *
  * A 401 means the ERP no longer accepts the session. The shopper is sent to
  * sign in and brought back here; the cart is in localStorage and is not
@@ -474,7 +483,17 @@ function Checkout({
         autoComplete="name"
         defaultValue={shopper?.name ?? undefined}
       />
-      {shopper ? (
+      {shopper?.email ? (
+        <CheckoutField
+          name="email"
+          label="Email"
+          type="email"
+          value={shopper.email}
+          readOnly
+          hint="Verified with the code we sent. This order is placed under it."
+        />
+      ) : null}
+      {shopper?.phone ? (
         <CheckoutField
           name="phone"
           label="Phone"
@@ -484,7 +503,14 @@ function Checkout({
           hint="Verified with the code we sent. Sign out to order with another number."
         />
       ) : (
-        <CheckoutField name="phone" label="Phone" required type="tel" autoComplete="tel" />
+        <CheckoutField
+          name="phone"
+          label="Phone"
+          required
+          type="tel"
+          autoComplete="tel"
+          hint={shopper ? "For the rider to call when they arrive." : undefined}
+        />
       )}
       <CheckoutField
         name="address"

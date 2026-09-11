@@ -6,35 +6,74 @@ import { useEffect, useState } from "react";
 import { useShopper } from "@/components/shopper-provider";
 import { Turnstile } from "@/components/turnstile";
 import { Button, Field, Input, Notice, Text } from "@/design-system";
+import type { LoginIdentifier, SignInChannel } from "@/lib/erp";
 import { safeNext } from "@/lib/next-path";
 
 /**
- * Two steps: a phone number, then the code sent to it.
+ * Two steps: an email address or a phone number, then the code sent to it.
+ *
+ * Which of the two is offered is the ERP's answer, not this form's: `channels`
+ * is the shop's `signInWith`, the channels the server can deliver a code on
+ * right now. Email comes first when both are there, because it is the one that
+ * works today; the phone step is kept whole for when an SMS provider lands. The
+ * page renders no form at all when the list is empty.
  *
  * The step is local state rather than a URL segment because a reload has to
- * start over anyway — the code is verified against the number, and a URL that
- * looked resumable but was not would be worse than one that plainly is not.
+ * start over anyway — the code is verified against the identifier, and a URL
+ * that looked resumable but was not would be worse than one that plainly is not.
  *
  * There is no challenge handle to carry: the ERP keeps one live code per phone
- * number, so the number the shopper typed is what step two submits alongside
- * the digits. That is also what makes the send throttle countable, since a
- * resend updates the same row rather than creating a rival one.
+ * number or address, so the one the shopper typed is what step two submits
+ * alongside the digits. That is also what makes the send throttle countable,
+ * since a resend updates the same row rather than creating a rival one.
  *
- * Nothing here reveals whether the number is known to the shop. The server
+ * Nothing here reveals whether the address is known to the shop. The server
  * answers a stranger and a regular identically, and this form moves to the code
- * step either way.
+ * step either way, with the same sentence.
  *
  * `next` has already been vetted by the page, and is vetted again here because
  * it is about to become a navigation and this is the component that makes it —
  * a prop is only as trustworthy as whoever renders the component next.
  */
-type Step = { name: "phone" } | { name: "code"; phone: string; resendAt: number };
+type Step =
+  | { name: "identify" }
+  | { name: "code"; identifier: LoginIdentifier; sentTo: string; resendAt: number };
 
-export function SignInForm({ tenant, next }: { tenant: string; next: string }) {
+const CHANNEL_COPY: Record<
+  SignInChannel,
+  { label: string; hint: string; switchTo: string; different: string }
+> = {
+  email: {
+    label: "Email address",
+    hint: "We will email you a six-digit code.",
+    switchTo: "Use my email instead",
+    different: "Use a different email",
+  },
+  phone: {
+    label: "Phone number",
+    hint: "The number the shop can reach you on. We will text you a code.",
+    switchTo: "Use my phone number instead",
+    different: "Use a different number",
+  },
+};
+
+export function SignInForm({
+  tenant,
+  next,
+  channels,
+}: {
+  tenant: string;
+  next: string;
+  /** Never empty; the page says so itself when the shop cannot send codes. */
+  channels: SignInChannel[];
+}) {
   const router = useRouter();
   const { refresh } = useShopper();
-  const [step, setStep] = useState<Step>({ name: "phone" });
-  const [phone, setPhone] = useState("");
+  const [channel, setChannel] = useState<SignInChannel>(
+    channels.includes("email") ? "email" : "phone",
+  );
+  const [step, setStep] = useState<Step>({ name: "identify" });
+  const [value, setValue] = useState("");
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -46,9 +85,12 @@ export function SignInForm({ tenant, next }: { tenant: string; next: string }) {
   // shopper could see and fix.
   const [turnstileNonce, setTurnstileNonce] = useState(0);
 
+  const other = channels.find((entry) => entry !== channel);
+  const copy = CHANNEL_COPY[channel];
+
   /**
    * Asking for a code costs the shop a message, so the server throttles it per
-   * phone number and tells us when it will answer again. Counting down to that
+   * identifier and tells us when it will answer again. Counting down to that
    * moment is kinder than a button that looks live and returns an error.
    */
   const resendAt = step.name === "code" ? step.resendAt : 0;
@@ -64,18 +106,26 @@ export function SignInForm({ tenant, next }: { tenant: string; next: string }) {
 
   /**
    * Shared by the first request and by a resend. A resend keeps the shopper on
-   * the code step: the challenge id changes, so the code they were sent first
-   * stops working, but making them retype the number to get a second message
-   * would be a worse trade.
+   * the code step and reuses the identifier the first code went to: the code
+   * they were sent first stops working, but making them retype the address to
+   * get a second message would be a worse trade.
    */
-  async function sendCode(stay: boolean) {
+  async function sendCode(resend: boolean) {
+    const identifier: LoginIdentifier =
+      resend && step.name === "code"
+        ? step.identifier
+        : channel === "email"
+          ? { email: value.trim() }
+          : { phone: value.trim() };
+    const sentTo = identifier.email ?? identifier.phone ?? "";
+
     setSubmitting(true);
     setError(null);
     try {
       const response = await fetch(`/api/${tenant}/auth/request-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, turnstileToken }),
+        body: JSON.stringify({ ...identifier, turnstileToken }),
       });
       const body = (await response.json()) as {
         data?: { resendAfterSeconds: number };
@@ -87,10 +137,11 @@ export function SignInForm({ tenant, next }: { tenant: string; next: string }) {
       }
       setStep({
         name: "code",
-        phone,
+        identifier,
+        sentTo,
         resendAt: Date.now() + body.data.resendAfterSeconds * 1000,
       });
-      if (stay) setCode("");
+      if (resend) setCode("");
     } catch {
       setError("Could not reach the shop. Check your connection.");
     } finally {
@@ -109,7 +160,7 @@ export function SignInForm({ tenant, next }: { tenant: string; next: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          phone: step.phone,
+          ...step.identifier,
           code,
           name: name || undefined,
         }),
@@ -142,7 +193,7 @@ export function SignInForm({ tenant, next }: { tenant: string; next: string }) {
         </Notice>
       ) : null}
 
-      {step.name === "phone" ? (
+      {step.name === "identify" ? (
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -150,33 +201,70 @@ export function SignInForm({ tenant, next }: { tenant: string; next: string }) {
           }}
           className="flex flex-col gap-4"
         >
+          {/* Keyed by channel so switching gives a fresh control: a phone
+              number left in an email field would fail the browser's own check
+              before the shopper had typed anything. */}
           <Field
-            id="sign-in-phone"
-            label="Phone number"
-            hint="The number the shop can reach you on."
+            key={channel}
+            id={`sign-in-${channel}`}
+            label={copy.label}
+            hint={copy.hint}
             required
           >
-            {(control) => (
-              <Input
-                {...control}
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                autoFocus
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-                required
-              />
-            )}
+            {(control) =>
+              channel === "email" ? (
+                <Input
+                  {...control}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  autoFocus
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                  required
+                />
+              ) : (
+                <Input
+                  {...control}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  autoFocus
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                  required
+                />
+              )
+            }
           </Field>
           <Button type="submit" loading={submitting} block>
             {submitting ? "Sending…" : "Send me a code"}
           </Button>
+
+          {other ? (
+            <Button
+              type="button"
+              variant="tertiary"
+              size="sm"
+              className="self-start"
+              disabled={submitting}
+              onClick={() => {
+                setChannel(other);
+                setValue("");
+                setError(null);
+              }}
+            >
+              {CHANNEL_COPY[other].switchTo}
+            </Button>
+          ) : null}
         </form>
       ) : (
         <form onSubmit={verify} className="flex flex-col gap-4">
+          {/* The same sentence for an address the shop has never seen: a
+              different one would tell a stranger who shops here. */}
           <Text variant="bodySmall" tone="subdued">
-            We sent a code to {step.phone}.
+            We&rsquo;ve sent a code to {step.sentTo}.
+            {step.identifier.email ? " It can take a minute; check your spam folder too." : ""}
           </Text>
 
           <Field id="sign-in-code" label="The six-digit code" required>
@@ -231,12 +319,12 @@ export function SignInForm({ tenant, next }: { tenant: string; next: string }) {
               size="sm"
               disabled={submitting}
               onClick={() => {
-                setStep({ name: "phone" });
+                setStep({ name: "identify" });
                 setCode("");
                 setError(null);
               }}
             >
-              Use a different number
+              {CHANNEL_COPY[step.identifier.email ? "email" : "phone"].different}
             </Button>
           </div>
         </form>

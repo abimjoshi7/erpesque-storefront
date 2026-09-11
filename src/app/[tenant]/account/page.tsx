@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 
 import { Card, EmptyState, StatusPill, Text } from "@/design-system";
-import { fetchOrders, isUnauthorized } from "@/lib/erp";
+import { fetchOrders, fetchShopperSession, isUnauthorized } from "@/lib/erp";
 import { formatPrice } from "@/lib/money";
 import { formatOrderDate, statusCopy } from "@/lib/order-status";
 import { readSession } from "@/lib/session";
@@ -37,9 +37,15 @@ export default async function AccountPage({
 
   const page = Number(pageParam) > 1 ? Number(pageParam) : 1;
 
+  // Side by side rather than one after the other: the history and the name at
+  // the top are independent reads of the same session.
   let history;
+  let shopper;
   try {
-    history = await fetchOrders(tenant, session, { page });
+    [history, shopper] = await Promise.all([
+      fetchOrders(tenant, session, { page }),
+      fetchShopperSession(tenant, session),
+    ]);
   } catch (error) {
     // An expired session lands back at sign-in rather than in the error
     // boundary: it is the ordinary end of a session, not a failure.
@@ -49,6 +55,12 @@ export default async function AccountPage({
 
   if (!history) redirect(`/${tenant}/sign-in`);
 
+  // The identity the shopper proved. An email sign-in has no verified phone,
+  // and saying which address this account is means a shopper with two — one by
+  // phone, one by email, which are separate accounts for now — can tell which
+  // history they are looking at.
+  const signedInAs = shopper?.shopper.phone ?? shopper?.shopper.email;
+
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
@@ -57,6 +69,11 @@ export default async function AccountPage({
         </Text>
         <SignOut tenant={tenant} />
       </div>
+      {signedInAs ? (
+        <Text variant="bodySmall" tone="muted" className="mt-2">
+          Signed in as {signedInAs}
+        </Text>
+      ) : null}
 
       {history.orders.length === 0 ? (
         <EmptyState

@@ -361,8 +361,10 @@ export async function fetchQuote(
  *
  * Goes through `privatePost` because it can carry a session, and so follows
  * that block's rules: never cached, and the session in `X-Shopper-Session`.
- * With a session the ERP stamps the buyer's account on the order and records
- * the phone the code was received on, whatever `contact.phone` says. On a shop
+ * With a session the ERP stamps the buyer's account on the order, and for a
+ * phone sign-in records the number the code was received on whatever
+ * `contact.phone` says; an email sign-in has no verified number, so the typed
+ * one is kept for delivery. On a shop
  * that requires sign-in, a missing or lapsed session is a 401 thrown from here,
  * which the order route turns into "sign in again".
  */
@@ -490,10 +492,25 @@ export type ShopperSession = components["schemas"]["StorefrontShopperSession"];
 export type OrderSummary = components["schemas"]["StorefrontOrderSummary"];
 
 /**
- * The answer to a code request. Says nothing about whether the phone was known:
- * the ERP answers a stranger and a regular identically, so this endpoint cannot
- * be used to find out who shops here. There is no challenge id — the phone
- * number is what identifies the challenge, and one number has one live code.
+ * Who a code is for: exactly one of a phone number or an email address, as the
+ * shopper typed it. The ERP canonicalises both — ten trailing digits, or the
+ * address trimmed and lower-cased — and a code is only ever redeemed against
+ * the same one it was sent to.
+ *
+ * A union rather than two optional fields, so that a call naming both, or
+ * neither, does not compile. The ERP refuses both with a 400 anyway; this
+ * keeps the mistake from being written in the first place.
+ */
+export type LoginIdentifier = { phone: string; email?: never } | { email: string; phone?: never };
+
+/** The channels a shop can deliver a sign-in code on right now. */
+export type SignInChannel = Tenant["signInWith"][number];
+
+/**
+ * The answer to a code request. Says nothing about whether the phone or address
+ * was known: the ERP answers a stranger and a regular identically, so this
+ * endpoint cannot be used to find out who shops here. There is no challenge id
+ * — the identifier is what names the challenge, and one has one live code.
  */
 export type LoginChallenge = {
   sent: boolean;
@@ -614,13 +631,13 @@ async function privatePost<T>(
  */
 export async function requestLoginCode(
   tenantCode: string,
-  phone: string,
+  identifier: LoginIdentifier,
   turnstileToken?: string,
   shopperIp?: string,
 ): Promise<LoginChallenge | null> {
   return privatePost<LoginChallenge>(
     `/storefront/${encodeURIComponent(tenantCode)}/auth/request-code`,
-    { phone, turnstileToken },
+    { ...identifier, turnstileToken },
     { shopperIp },
   );
 }
@@ -628,14 +645,14 @@ export async function requestLoginCode(
 /**
  * Exchanges a code for a session.
  *
- * Keyed by the phone number rather than by a challenge id, because one number
- * has exactly one live code — which is also what makes the send throttle a
- * throttle. `name` is for a form that doubles as a sign-up; omitting it leaves
- * whatever name the shopper's last order recorded.
+ * Keyed by the phone number or email address rather than by a challenge id,
+ * because one identifier has exactly one live code — which is also what makes
+ * the send throttle a throttle. `name` is for a form that doubles as a
+ * sign-up; omitting it leaves whatever name the shopper's last order recorded.
  */
 export async function verifyLoginCode(
   tenantCode: string,
-  payload: { phone: string; code: string; name?: string },
+  payload: LoginIdentifier & { code: string; name?: string },
   shopperIp?: string,
 ): Promise<LoginResult | null> {
   return privatePost<LoginResult>(

@@ -31,11 +31,12 @@ const SIGN_IN_AGAIN = "Your session ended — sign in again to place your order.
  *
  * The shopper's session, when there is one, is forwarded as `X-Shopper-Session`
  * and never looked at here. The ERP decides what it means: it bills the order
- * to the buyer's account and records the phone the sign-in code was received
- * on in place of whatever was typed. On a shop that requires sign-in, the ERP
- * refuses an order without a live session, and so does this handler — early,
- * when there is no cookie at all, so a signed-out request never reaches the
- * ERP. That early check is a courtesy to the ERP and not the boundary; the
+ * to the buyer's account, and where the shopper signed in by phone it records
+ * that verified number in place of whatever was typed (an email sign-in keeps
+ * the typed number, as one for the rider to ring). On a shop that requires
+ * sign-in, the ERP refuses an order without a live session, and so does this
+ * handler — early, when there is no cookie at all, so a signed-out request
+ * never reaches the ERP. That early check is a courtesy to the ERP and not the boundary; the
  * ERP's own 401 is, and it also covers a cookie that exists but has lapsed.
  */
 export async function POST(

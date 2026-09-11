@@ -29,6 +29,13 @@ export const metadata: Metadata = {
  * sends a shopper whose session has lapsed to this page, and if this page sent
  * anyone holding a cookie back to the cart, a lapsed cookie would bounce
  * between the two forever.
+ *
+ * How a code is sent is the shop's `signInWith` — email today, SMS when a
+ * provider lands. When it is empty the server cannot deliver a code at all, and
+ * the page says so plainly rather than offering a form whose first step is
+ * certain to fail. On a shop that also requires sign-in, that is a shop that
+ * cannot take orders, and the copy is written for the merchant as much as for
+ * the shopper.
  */
 export default async function SignInPage({
   params,
@@ -60,6 +67,8 @@ export default async function SignInPage({
   if (signedIn) redirect(next);
 
   const checkingOut = next === `/${tenant}/cart`;
+  const channels = shop.signInWith;
+  const byEmail = channels.includes("email");
 
   return (
     <main className="mx-auto max-w-md px-6 py-12">
@@ -67,23 +76,39 @@ export default async function SignInPage({
         Sign in
       </Text>
       <Text variant="bodyLarge" tone="subdued" className="mt-2">
-        We will send a code to your phone. There is no password to remember.
+        {byEmail
+          ? "We will email you a code. There is no password to remember."
+          : "We will send a code to your phone. There is no password to remember."}
       </Text>
 
       {shop.requireSignIn ? (
         <Notice tone="info" className="mt-6">
           {checkingOut
             ? "Sign in to place your order. Your cart is kept exactly as you left it."
-            : `${shop.name} takes orders from signed-in customers, so every order is tied to a phone number that has received a code.`}
+            : `${shop.name} takes orders from signed-in customers, so every order is tied to an address that has received a code.`}
         </Notice>
       ) : null}
 
-      <SignInForm tenant={tenant} next={next} />
+      {channels.length === 0 ? (
+        <Notice tone="critical" className="mt-6">
+          {shop.name} cannot send sign-in codes at the moment, so nobody can sign in
+          {shop.requireSignIn ? " — or place an order — " : " "}
+          until it can. Please contact the shop directly.
+        </Notice>
+      ) : (
+        <SignInForm tenant={tenant} next={next} channels={channels} />
+      )}
 
-      <Text variant="caption" tone="muted" className="mt-8">
-        Ordered before as a guest? Sign in with the same number and your past
-        orders will be here.
-      </Text>
+      {/* Only true of a phone sign-in: a guest order records a phone number
+          that was typed, never an email, so signing in by email adopts
+          nothing — matching it by phone would hand a guest's history to anyone
+          who had typed their number. */}
+      {channels.includes("phone") ? (
+        <Text variant="caption" tone="muted" className="mt-8">
+          Ordered before as a guest? Sign in with the same phone number and your
+          past orders will be here.
+        </Text>
+      ) : null}
     </main>
   );
 }

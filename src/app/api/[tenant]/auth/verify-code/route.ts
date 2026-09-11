@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 
 import { authErrorResponse } from "@/lib/cart-request";
 import { shopperIp } from "@/lib/client-ip";
-import { verifyLoginCode } from "@/lib/erp";
+import { verifyLoginCode, type LoginIdentifier } from "@/lib/erp";
+import { readIdentifier } from "@/lib/login-identifier";
 import { forbiddenResponse, isSameOrigin } from "@/lib/same-origin";
 import { setSession } from "@/lib/session";
 
@@ -15,9 +16,10 @@ import { setSession } from "@/lib/session";
  * keeping it to one place means the cookie's attributes are decided once, in
  * `lib/session`.
  *
- * Keyed by the phone number rather than by a challenge id, because the ERP
- * keeps exactly one live code per number. There is no handle for this form to
- * hold, which is also what makes the send throttle countable.
+ * Keyed by the phone number or email address rather than by a challenge id,
+ * because the ERP keeps exactly one live code per identifier. There is no
+ * handle for this form to hold, which is also what makes the send throttle
+ * countable. The body must name the same one the code was sent to.
  *
  * The token the ERP returns here is its only copy; the ERP keeps a digest. It
  * goes straight into an httpOnly cookie and is never included in the response
@@ -31,22 +33,24 @@ export async function POST(
 
   const { tenant } = await params;
 
-  let phone: string;
+  let identifier: LoginIdentifier;
   let code: string;
   let name: string | undefined;
   try {
     const body = (await request.json()) as {
       phone?: unknown;
+      email?: unknown;
       code?: unknown;
       name?: unknown;
     };
-    if (typeof body.phone !== "string" || !body.phone.trim()) {
-      return NextResponse.json({ error: "Start again from your phone number." }, { status: 400 });
+    const read = readIdentifier(body);
+    if ("error" in read) {
+      return NextResponse.json({ error: "Start again from the first step." }, { status: 400 });
     }
     if (typeof body.code !== "string" || !body.code.trim()) {
       return NextResponse.json({ error: "Enter the code you were sent." }, { status: 400 });
     }
-    phone = body.phone.trim();
+    identifier = read.identifier;
     code = body.code.trim();
     name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : undefined;
   } catch {
@@ -54,7 +58,11 @@ export async function POST(
   }
 
   try {
-    const result = await verifyLoginCode(tenant, { phone, code, name }, shopperIp(request));
+    const result = await verifyLoginCode(
+      tenant,
+      { ...identifier, code, name },
+      shopperIp(request),
+    );
     if (!result) {
       return NextResponse.json({ error: "This shop is not available." }, { status: 404 });
     }

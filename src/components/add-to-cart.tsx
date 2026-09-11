@@ -71,8 +71,8 @@ export function AddToCart({
       <div className="mt-8 flex flex-col items-start gap-3">
         <ButtonLink href={signInHref(tenant, pathname)}>Sign in to buy</ButtonLink>
         <Text variant="bodySmall" tone="subdued">
-          This shop takes orders from signed-in customers. We will text you a code;
-          there is no password.
+          This shop takes orders from signed-in customers. We will send you a
+          code; there is no password.
         </Text>
       </div>
     );

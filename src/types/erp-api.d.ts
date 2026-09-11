@@ -10429,13 +10429,17 @@ export interface paths {
          *     is optional: presenting one stamps `storefront_account_id` on the order,
          *     and a guest or a stale session places a guest order exactly as before.
          *
-         *     A signed-in order is placed on the phone number the session's code was
-         *     received on. `contact.phone` is still required by the schema so the
-         *     guest and signed-in bodies stay one shape, but when a session is
-         *     presented it is ignored and the session's phone is recorded instead - a
-         *     number typed into a form proves nothing, and one a code was received on
-         *     does. Name, address and landmark are taken from the request as given,
-         *     so a buyer can send a parcel somewhere new.
+         *     A signed-in order is attributed to the session's own shopper, never to
+         *     whoever the typed phone number belongs to. Where the session has a
+         *     verified phone (the shopper signed in by phone), the order is placed on
+         *     that number: `contact.phone` is still required by the schema so the
+         *     guest and signed-in bodies stay one shape, but it is ignored and the
+         *     verified number recorded instead - a number typed into a form proves
+         *     nothing, and one a code was received on does. Where the session was
+         *     verified by email, `contact.phone` is recorded as typed, as a number to
+         *     ring for delivery, and is not used to find or merge any shopper record.
+         *     Name, address and landmark are taken from the request as given, so a
+         *     buyer can send a parcel somewhere new.
          *
          *     Prices the cart exactly as `/quote` does, then writes an
          *     ordinary `sales_orders` row with `source = 'web'`,
@@ -10704,23 +10708,26 @@ export interface paths {
         put?: never;
         /**
          * Send a shopper a one-time sign-in code
-         * @description Unauthenticated. Writes or updates the single live challenge for this
-         *     number and sends the code by SMS.
+         * @description Unauthenticated. The body names exactly one of `phone` or `email`; the
+         *     code goes to that address, by SMS or by email. Both, or neither, is 400.
+         *     Which channels this deployment can deliver on right now is published as
+         *     `StorefrontTenant.signInWith`, and asking for one that is not listed
+         *     answers 503 rather than reporting a send that never happened.
          *
-         *     The response is identical whether or not the shop has ever seen the
-         *     number. It has to be - a differing reply would make this a way to ask
-         *     "does this person shop here", which is the customer list the module
+         *     Writes or updates the single live challenge for that identifier. The
+         *     response is identical whether or not the shop has ever seen the number
+         *     or address. It has to be - a differing reply would make this a way to
+         *     ask "does this person shop here", which is the customer list the module
          *     spends its effort not leaking.
          *
-         *     Throttled on the canonical phone, not on the caller's address: every
-         *     shopper reaches this API through the storefront's server, so the only
-         *     IP the edge sees is that server's, and the phone number is what costs
-         *     money to send to. One live challenge exists per number and a resend
-         *     updates it in place, so the send counters survive the resend - a
-         *     counter a new row would reset is not a counter.
-         *
-         *     Returns 503 when the shop has no SMS provider configured, rather than
-         *     reporting a send that never happened. Implemented in
+         *     Throttled on the identifier - the canonical phone, or the address
+         *     trimmed and lower-cased - not on the caller's address: every shopper
+         *     reaches this API through the storefront's server, so the only IP the
+         *     edge sees is that server's, and the identifier is what a message is
+         *     sent to. One live challenge exists per identifier and a resend updates
+         *     it in place, so the send counters survive the resend - a counter a new
+         *     row would reset is not a counter. Turnstile, the send cap and the
+         *     attempt cap apply to email exactly as to phone. Implemented in
          *     `routes/storefront_auth.rs::request_code`.
          */
         post: {
@@ -10740,12 +10747,19 @@ export interface paths {
                          *     digits, so "+977 9841112233" and "9841112233" are one
                          *     person and hold one challenge between them.
                          */
-                        phone: string;
+                        phone?: string;
+                        /**
+                         * @description As the shopper typed it. Identity is the address trimmed
+                         *     and lower-cased, so "Ram@Example.com " and
+                         *     "ram@example.com" hold one challenge between them.
+                         */
+                        email?: string;
                         /**
                          * @description Cloudflare Turnstile token from the sign-in form. Checked
                          *     only where `TURNSTILE_SECRET_KEY` is set, and after the
-                         *     phone number has been validated - the token is single-use,
-                         *     so challenging first would make a retry fail on a replay.
+                         *     number or address has been validated - the token is
+                         *     single-use, so challenging first would make a retry fail
+                         *     on a replay.
                          */
                         turnstileToken?: string | null;
                     };
@@ -10753,8 +10767,8 @@ export interface paths {
             };
             responses: {
                 /**
-                 * @description A code was sent. Says nothing about whether the number is known to
-                 *     the shop.
+                 * @description A code was sent. Says nothing about whether the number or address
+                 *     is known to the shop.
                  */
                 200: {
                     headers: {
@@ -10768,8 +10782,8 @@ export interface paths {
                                 expiresInSeconds: number;
                                 /**
                                  * @description Seconds until another code may be requested for
-                                 *     this number. Escalates with each send in the hour:
-                                 *     60, 120, 300, then 900.
+                                 *     this number or address. Escalates with each send in
+                                 *     the hour: 60, 120, 300, then 900.
                                  */
                                 resendAfterSeconds: number;
                             };
@@ -10777,8 +10791,9 @@ export interface paths {
                     };
                 };
                 /**
-                 * @description The number looks wrong, or a code was sent too recently, or the
-                 *     hourly cap for this number is used up. The message names which.
+                 * @description Both or neither of `phone` and `email` were given, the one given
+                 *     looks wrong, a code was sent too recently, or the hourly cap for it
+                 *     is used up. The message names which.
                  */
                 400: {
                     headers: {
@@ -10800,8 +10815,10 @@ export interface paths {
                 404: components["responses"]["NotFound"];
                 429: components["responses"]["TooManyRequests"];
                 /**
-                 * @description The shop has no SMS provider configured, or the provider would not
-                 *     take the message. Nothing was sent.
+                 * @description The channel asked for is not configured on this server (no SMS
+                 *     provider for `phone`, no email sender for `email`), the provider
+                 *     would not take the message, or the server requires Turnstile and
+                 *     has no secret to check it with. Nothing was sent.
                  */
                 503: {
                     headers: {
@@ -10840,11 +10857,16 @@ export interface paths {
          *     code; the count is committed even on a failed attempt, or every guess
          *     would be free.
          *
-         *     Signing in adopts the shopper's earlier guest orders into their
-         *     account, so a year of checking out as a guest does not present as an
-         *     empty history. The proof runs the right way round: a guest order
+         *     The body names the same one of `phone` or `email` the code was sent to.
+         *
+         *     Signing in by phone adopts the shopper's earlier guest orders into
+         *     their account, so a year of checking out as a guest does not present as
+         *     an empty history. The proof runs the right way round: a guest order
          *     records a phone number that was merely typed, a session records one a
-         *     code was received on.
+         *     code was received on. Signing in by email adopts nothing - a guest
+         *     order carries no email to match, and matching it by a phone number the
+         *     email session never proved would hand anyone who typed a victim's
+         *     number that victim's history.
          *
          *     `token` in the response is the only copy - the database keeps a
          *     SHA-256. The storefront's server holds it and presents it as
@@ -10864,7 +10886,8 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        phone: string;
+                        phone?: string;
+                        email?: string;
                         /**
                          * @description Six digits. Punctuation and spaces are stripped, so a code
                          *     pasted with its surrounding text still works.
@@ -11278,6 +11301,14 @@ export interface paths {
                          * @description Null means delivery is never free.
                          */
                         freeDeliveryOver?: number | null;
+                        /**
+                         * @description Whether only signed-in shoppers may fill a cart and check
+                         *     out. Unlike every other field here, omitting it leaves the
+                         *     saved value alone rather than resetting it: a settings page
+                         *     written before the flag existed must not reopen guest
+                         *     checkout by saving a delivery fee. New shops start at true.
+                         */
+                        requireSignIn?: boolean;
                     };
                 };
             };
@@ -11379,8 +11410,11 @@ export interface paths {
          *     Pricelist and location are not requirements - `PUT
          *     /storefront-admin/settings` treats "none" as a real choice, not an
          *     incomplete one. The one thing an empty shop cannot do without is a
-         *     product to sell. Implemented in
-         *     `routes/storefront_admin.rs::get_readiness`.
+         *     product to sell - and, when it requires sign-in, a way to sign in: a
+         *     shop with `requireSignIn` on, on a server that can send codes neither
+         *     by email nor by SMS, cannot take a single order and is reported as not
+         *     ready. Reported only; a shop already live in that state stays live.
+         *     Implemented in `routes/storefront_admin.rs::get_readiness`.
          */
         get: {
             parameters: {
@@ -13822,6 +13856,12 @@ export interface components {
              *     cannot count towards the threshold that decides whether it applies.
              */
             freeDeliveryOver?: number | null;
+            /**
+             * @description Whether only signed-in shoppers may fill a cart and check out.
+             *     Published to shoppers as `StorefrontTenant.requireSignIn`, and
+             *     enforced by `POST /storefront/{tenantCode}/order`.
+             */
+            requireSignIn?: boolean;
         };
         /** @description An id and a name for a settings dropdown. */
         StorefrontOption: {
@@ -14064,7 +14104,17 @@ export interface components {
                  *     recorded.
                  */
                 name?: string | null;
-                phone: string;
+                /**
+                 * @description The phone number this shopper has *verified* by receiving a
+                 *     code on it. Null for a shopper who signed in by email - a number
+                 *     they typed at checkout is on their orders, never here.
+                 */
+                phone?: string | null;
+                /**
+                 * @description The email address this shopper has verified by receiving a code
+                 *     at it. Null for a shopper who signed in by phone.
+                 */
+                email?: string | null;
                 /**
                  * @description The delivery address on this shopper's most recent order, for
                  *     checkout to offer as a default. Read from the order rather than
@@ -14129,6 +14179,15 @@ export interface components {
              *     client that ignores it gains nothing.
              */
             requireSignIn: boolean;
+            /**
+             * @description The channels this deployment can deliver a sign-in code on right
+             *     now: `email` when an email sender is configured, `phone` when an SMS
+             *     provider is. Empty means nobody can sign in - and, where
+             *     `requireSignIn` is true, that nobody can order. A property of the
+             *     server rather than the shop, repeated here so a storefront needs no
+             *     second request to draw its sign-in form.
+             */
+            signInWith: ("email" | "phone")[];
             /**
              * @description Display name. Currently echoes `code` - `tenants` has no name column,
              *     so this becomes a storefront preference when merchant settings ship.
