@@ -1,4 +1,4 @@
-import { Skeleton } from "@/design-system";
+import { Container, Skeleton } from "@/design-system";
 
 /**
  * Its own file so the cart does not borrow the catalog's skeleton on the way
@@ -10,11 +10,12 @@ import { Skeleton } from "@/design-system";
  */
 export default function CartLoading() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12" aria-busy="true">
-      <div className="mb-8 border-b border-line pb-6">
-        <Skeleton className="h-8 w-40" />
+    <Container as="main" className="py-8 sm:py-12">
+      <div aria-busy="true">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="mt-4 h-9 w-48" />
+        <span className="sr-only">Loading your cart…</span>
       </div>
-      <span className="sr-only">Loading your cart…</span>
-    </main>
+    </Container>
   );
 }

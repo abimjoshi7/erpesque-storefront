@@ -83,6 +83,11 @@
   --surface-elevated: var(--ref-neutral-0);
   --surface-subdued: var(--ref-neutral-100);
   --overlay: rgb(0 0 0 / 0.4);
+  /* The ground a product photograph sits on. White in both themes, never
+     reassigned below: merchants shoot stock on white, and a white photograph
+     inside a grey or near-black tile reads as a pasted-on rectangle. A white
+     tile lets the picture's own edge disappear into it. */
+  --media: var(--ref-neutral-0);
 
   --primary: var(--ref-gold-500);
   --primary-hover: var(--ref-gold-600);
@@ -276,6 +281,7 @@
   --color-surface-elevated: var(--surface-elevated);
   --color-surface-subdued: var(--surface-subdued);
   --color-overlay: var(--overlay);
+  --color-media: var(--media);
 
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
@@ -330,6 +336,15 @@
   /* Type scale — DSTypography, in rem so a shopper's browser font size still
      counts. Negative tracking is the Flutter scale's `letterSpacing` at the
      same ratio. */
+
+  /* Web-only: the one size above h1, for a page's lead heading on a wide
+     screen. A shop window wants a heading that reads from across the room,
+     which an admin screen never does — hence no Flutter counterpart. */
+  --text-display: 2.25rem;
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.025em;
+  --text-display--font-weight: 700;
+
   --text-h1: 1.75rem;
   --text-h1--line-height: 1.29;
   --text-h1--letter-spacing: -0.02em;

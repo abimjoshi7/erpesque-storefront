@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Text } from "@/design-system";
+import { Button, Icon, Text } from "@/design-system";
 
 /**
  * The failure a shop's own error page cannot catch.
@@ -24,19 +24,20 @@ export default function AppError({
   retry: () => void;
 }) {
   return (
-    <main className="mx-auto flex max-w-xl flex-1 flex-col justify-center px-6 py-24">
-      <Text as="h1" variant="displayMedium">
+    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-6 py-24 text-center">
+      <span className="flex size-14 items-center justify-center rounded-full bg-critical-soft text-critical">
+        <Icon name="alert" className="size-7" />
+      </span>
+      <Text as="h1" variant="displayMedium" className="mt-6">
         This page would not load
       </Text>
-      <Text variant="bodyLarge" tone="subdued" className="mt-3">
+      <Text variant="bodyLarge" tone="subdued" className="mt-3 text-balance">
         Something went wrong at our end, not yours. Nothing has been ordered and
         your cart is untouched.
       </Text>
-      <div>
-        <Button className="mt-6" onClick={() => retry()}>
-          Try again
-        </Button>
-      </div>
+      <Button className="mt-8" onClick={() => retry()}>
+        Try again
+      </Button>
       {error.digest ? (
         <Text variant="caption" tone="disabled" className="mt-6">
           Reference {error.digest}

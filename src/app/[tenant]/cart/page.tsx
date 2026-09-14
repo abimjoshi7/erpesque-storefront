@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 
 import { CartView, type CheckoutShopper } from "@/app/[tenant]/cart/cart-view";
-import { Text } from "@/design-system";
+import { Breadcrumbs, Container, Text } from "@/design-system";
 import {
   fetchShop,
   fetchShopLive,
@@ -83,8 +83,9 @@ export default async function CartPage({ params }: PageProps) {
   if (requireSignIn) redirect(signIn);
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <Text as="h1" variant="displayMedium" className="mb-8 border-b border-line pb-6">
+    <Container as="main" className="py-8 sm:py-12">
+      <Breadcrumbs items={[{ label: "Home", href: `/${tenant}` }, { label: "Cart" }]} />
+      <Text as="h1" variant="display" className="mt-4">
         Your cart
       </Text>
 
@@ -94,7 +95,7 @@ export default async function CartPage({ params }: PageProps) {
         shopper={session ? checkoutShopper(session) : null}
         signInHref={signIn}
       />
-    </main>
+    </Container>
   );
 }
 

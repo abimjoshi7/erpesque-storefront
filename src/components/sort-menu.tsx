@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { cx } from "@/design-system";
+import { Icon, cx } from "@/design-system";
 import { listingHref, withFilters, type ListingFilters } from "@/lib/catalog-url";
 import { CATALOG_SORTS, type CatalogSort } from "@/lib/erp";
 
@@ -43,36 +43,28 @@ export function SortMenu({
   const current = filters.sort ?? "featured";
 
   return (
-    <details className="relative shrink-0">
+    <details className="group relative shrink-0">
       <summary
         className={cx(
-          "flex cursor-pointer list-none items-center gap-2 rounded-md border border-line-strong",
-          "bg-secondary px-3 py-1.5 text-body-sm font-semibold text-ink-strong shadow-xs",
-          "transition-colors duration-(--duration-fast) ease-standard hover:bg-secondary-pressed",
+          "flex h-10 cursor-pointer list-none items-center gap-2 rounded-md border border-line-strong",
+          "bg-surface px-3.5 text-body-sm text-ink-strong shadow-xs",
+          "transition-colors duration-(--duration-fast) ease-standard hover:border-line-active",
           // Safari draws its own triangle on a summary and ignores list-style.
           "[&::-webkit-details-marker]:hidden",
         )}
       >
-        <span className="text-ink-subdued">Sort</span>
-        {LABELS[current]}
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="size-3.5 text-ink-muted"
-          aria-hidden="true"
-        >
-          <path d="m6 9 6 6 6-6" />
-        </svg>
+        <span className="text-ink-subdued">Sort by</span>
+        <span className="font-semibold">{LABELS[current]}</span>
+        <Icon
+          name="chevron-down"
+          className="size-4 text-ink-muted transition-transform duration-(--duration-fast) ease-standard group-open:rotate-180"
+        />
       </summary>
 
       <ul
         className={cx(
-          "absolute right-0 z-10 mt-2 w-56 overflow-hidden rounded-md border border-line",
-          "bg-surface-elevated py-1 shadow-lg",
+          "absolute right-0 z-20 mt-2 w-60 overflow-hidden rounded-lg border border-line",
+          "bg-surface-elevated p-1 shadow-lg",
         )}
       >
         {CATALOG_SORTS.map((sort) => {
@@ -86,27 +78,14 @@ export function SortMenu({
                 // accessibility tree, so this is what actually announces it.
                 aria-current={isCurrent ? "true" : undefined}
                 className={cx(
-                  "flex items-center justify-between gap-2 px-3 py-2 text-body-sm",
+                  "flex items-center justify-between gap-2 rounded-md px-3 py-2 text-body-sm",
                   isCurrent
-                    ? "font-semibold text-ink-strong"
+                    ? "bg-surface-subdued font-semibold text-ink-strong"
                     : "text-ink-subdued hover:bg-surface-subdued hover:text-ink-strong",
                 )}
               >
                 {LABELS[sort]}
-                {isCurrent ? (
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="size-3.5"
-                    aria-hidden="true"
-                  >
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                ) : null}
+                {isCurrent ? <Icon name="check" className="size-4" /> : null}
               </Link>
             </li>
           );

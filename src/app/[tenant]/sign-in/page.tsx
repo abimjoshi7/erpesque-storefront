@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 
-import { Notice, Text } from "@/design-system";
+import { ButtonLink, Card, Container, Icon, Notice, Text } from "@/design-system";
 import { fetchShopLive, fetchShopperSession, isUnauthorized } from "@/lib/erp";
 import { safeNext } from "@/lib/next-path";
 import { readSession } from "@/lib/session";
@@ -75,44 +75,62 @@ export default async function SignInPage({
   const byEmail = channels.includes("email");
 
   return (
-    <main className="mx-auto max-w-md px-6 py-12">
-      <Text as="h1" variant="displayMedium">
-        Sign in
-      </Text>
-      <Text variant="bodyLarge" tone="subdued" className="mt-2">
-        {byEmail
-          ? "We will email you a code. There is no password to remember."
-          : "We will send a code to your phone. There is no password to remember."}
-      </Text>
+    <Container as="main" className="py-10 sm:py-16">
+      <div className="mx-auto w-full max-w-md">
+        <div className="flex flex-col items-center text-center">
+          <span className="flex size-12 items-center justify-center rounded-full bg-accent-soft text-ink-strong">
+            <Icon name={byEmail ? "mail" : "user"} className="size-6" />
+          </span>
+          <Text as="h1" variant="displayMedium" className="mt-4">
+            Sign in
+          </Text>
+          <Text variant="bodyLarge" tone="subdued" className="mt-2 text-balance">
+            {byEmail
+              ? "We will email you a code. There is no password to remember."
+              : "We will send a code to your phone. There is no password to remember."}
+          </Text>
+        </div>
 
-      {shop.requireSignIn ? (
-        <Notice tone="info" className="mt-6">
-          {checkingOut
-            ? "Sign in to place your order. Your cart is kept exactly as you left it."
-            : `${shop.name} takes orders from signed-in customers, so every order is tied to an address that has received a code.`}
-        </Notice>
-      ) : null}
+        <Card padding={false} elevation="md" className="mt-8">
+          <div className="p-6 sm:p-8">
+            {shop.requireSignIn ? (
+              <Notice tone="info" className="mb-6">
+                {checkingOut
+                  ? "Sign in to place your order. Your cart is kept exactly as you left it."
+                  : `${shop.name} takes orders from signed-in customers, so every order is tied to an address that has received a code.`}
+              </Notice>
+            ) : null}
 
-      {channels.length === 0 ? (
-        <Notice tone="critical" className="mt-6">
-          {shop.name} cannot send sign-in codes at the moment, so nobody can sign in
-          {shop.requireSignIn ? " — or place an order — " : " "}
-          until it can. Please contact the shop directly.
-        </Notice>
-      ) : (
-        <SignInForm tenant={tenant} next={next} channels={channels} />
-      )}
+            {channels.length === 0 ? (
+              <Notice tone="critical">
+                {shop.name} cannot send sign-in codes at the moment, so nobody can sign in
+                {shop.requireSignIn ? " — or place an order — " : " "}
+                until it can. Please contact the shop directly.
+              </Notice>
+            ) : (
+              <SignInForm tenant={tenant} next={next} channels={channels} />
+            )}
+          </div>
+        </Card>
 
-      {/* Only true of a phone sign-in: a guest order records a phone number
-          that was typed, never an email, so signing in by email adopts
-          nothing — matching it by phone would hand a guest's history to anyone
-          who had typed their number. */}
-      {channels.includes("phone") ? (
-        <Text variant="caption" tone="muted" className="mt-8">
-          Ordered before as a guest? Sign in with the same phone number and your
-          past orders will be here.
-        </Text>
-      ) : null}
-    </main>
+        {/* Only true of a phone sign-in: a guest order records a phone number
+            that was typed, never an email, so signing in by email adopts
+            nothing — matching it by phone would hand a guest's history to
+            anyone who had typed their number. */}
+        {channels.includes("phone") ? (
+          <Text variant="caption" tone="muted" className="mt-6 text-center">
+            Ordered before as a guest? Sign in with the same phone number and your
+            past orders will be here.
+          </Text>
+        ) : null}
+
+        <div className="mt-6 flex justify-center">
+          <ButtonLink href={`/${tenant}`} variant="tertiary" size="sm">
+            <Icon name="arrow-left" className="size-4" />
+            Back to {shop.name}
+          </ButtonLink>
+        </div>
+      </div>
+    </Container>
   );
 }

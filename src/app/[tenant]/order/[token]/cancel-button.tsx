@@ -3,13 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Button, Notice, Text } from "@/design-system";
+import { Button, Card, Notice, Text } from "@/design-system";
 
 /**
  * Cancels the order this page is showing.
  *
  * Behind a confirmation because it cannot be undone from here — re-ordering is
- * possible, un-cancelling is not.
+ * possible, un-cancelling is not. Only the confirming button wears the
+ * destructive red; the first one merely asks, and a red button that only asks
+ * teaches a shopper that red does not mean it.
  *
  * The ERP re-checks server-side that the order is still cancellable, so a page
  * left open while the shop confirmed the order gets an honest refusal rather
@@ -48,7 +50,13 @@ export function CancelOrder({ tenant, token }: { tenant: string; token: string }
   }
 
   return (
-    <div className="mt-8 border-t border-line pt-6">
+    <Card
+      header={
+        <Text as="h2" variant="headlineMedium">
+          Changed your mind?
+        </Text>
+      }
+    >
       {error ? (
         <Notice tone="critical" className="mb-4">
           {error}
@@ -56,30 +64,39 @@ export function CancelOrder({ tenant, token }: { tenant: string; token: string }
       ) : null}
 
       {confirming ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <Text variant="bodySmall">Cancel this order? This cannot be undone.</Text>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={cancel}
-            loading={submitting}
-          >
-            {submitting ? "Cancelling…" : "Yes, cancel it"}
-          </Button>
-          <Button
-            variant="tertiary"
-            size="sm"
-            onClick={() => setConfirming(false)}
-            disabled={submitting}
-          >
-            Keep the order
-          </Button>
+        <div className="flex flex-col gap-3">
+          <Text variant="bodySmall" tone="strong" className="font-semibold">
+            Cancel this order? This cannot be undone.
+          </Text>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={cancel}
+              loading={submitting}
+            >
+              {submitting ? "Cancelling…" : "Yes, cancel it"}
+            </Button>
+            <Button
+              variant="tertiary"
+              size="sm"
+              onClick={() => setConfirming(false)}
+              disabled={submitting}
+            >
+              Keep the order
+            </Button>
+          </div>
         </div>
       ) : (
-        <Button variant="tertiary" size="sm" onClick={() => setConfirming(true)}>
-          Cancel this order
-        </Button>
+        <div className="flex flex-col items-start gap-3">
+          <Text variant="bodySmall" tone="subdued">
+            You can cancel this order until the shop starts on it.
+          </Text>
+          <Button variant="secondary" size="sm" onClick={() => setConfirming(true)}>
+            Cancel this order
+          </Button>
+        </div>
       )}
-    </div>
+    </Card>
   );
 }

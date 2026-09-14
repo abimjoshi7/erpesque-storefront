@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 
-import { Button, Input } from "@/design-system";
+import { Icon } from "@/design-system";
 
 /**
  * Search over the shop's catalog.
@@ -18,6 +18,10 @@ import { Button, Input } from "@/design-system";
  * not given the search params it must echo back. Without them a search would
  * empty its own box on submit and quietly drop whichever category the shopper
  * had narrowed to.
+ *
+ * The magnifier is the submit button, not decoration. Enter is how most people
+ * search, but a form needs a control a pointer or a switch can reach too, and
+ * the glyph everyone already reads as "search" is the obvious one to press.
  */
 export function SearchBox({ tenant }: { tenant: string }) {
   const params = useSearchParams();
@@ -33,7 +37,7 @@ export function SearchBox({ tenant }: { tenant: string }) {
       action={`/${encodeURIComponent(tenant)}`}
       method="get"
       role="search"
-      className="flex w-full items-center gap-2 sm:max-w-xs"
+      className="relative w-full"
     >
       {/* The filters the shopper already chose. A search inside a category
           means both, and dropping one silently would widen their results
@@ -44,7 +48,7 @@ export function SearchBox({ tenant }: { tenant: string }) {
       <label className="sr-only" htmlFor="shop-search">
         Search products
       </label>
-      <Input
+      <input
         id="shop-search"
         type="search"
         name="q"
@@ -53,13 +57,17 @@ export function SearchBox({ tenant }: { tenant: string }) {
         // clears a search or presses back.
         key={q}
         defaultValue={q}
-        placeholder="Search products"
+        placeholder={category ? `Search in ${category}` : "Search products"}
         autoComplete="off"
-        className="flex-1 py-1.5"
+        className="h-11 w-full min-w-0 rounded-full border border-line bg-surface-subdued pr-4 pl-11 text-body text-ink placeholder:text-ink-muted transition-colors duration-(--duration-fast) ease-standard hover:border-line-strong focus:border-line-active focus:bg-surface focus:ring-1 focus:ring-line-active focus:outline-hidden"
       />
-      <Button type="submit" variant="secondary" size="sm" className="shrink-0">
-        Search
-      </Button>
+      <button
+        type="submit"
+        aria-label="Search"
+        className="absolute top-1/2 left-1 flex size-9 -translate-y-1/2 items-center justify-center rounded-full text-ink-muted transition-colors duration-(--duration-fast) ease-standard hover:bg-surface hover:text-ink-strong"
+      >
+        <Icon name="search" className="size-[1.125rem]" />
+      </button>
     </form>
   );
 }

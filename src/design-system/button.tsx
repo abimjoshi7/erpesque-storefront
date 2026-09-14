@@ -20,7 +20,7 @@ export type ButtonVariant =
   | "accent"
   | "destructive";
 
-export type ButtonSize = "sm" | "md";
+export type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANTS: Record<ButtonVariant, string> = {
   // The sheen is a gradient token rather than a flat `bg-primary`: gold at
@@ -40,6 +40,8 @@ const SIZES: Record<ButtonSize, string> = {
   sm: "min-h-8 gap-1.5 rounded-sm px-3 py-1.5 text-body-sm font-semibold",
   // 44px minimum, the same touch target the Flutter button enforces.
   md: "min-h-11 gap-2 rounded-md px-5 py-2.5 text-title font-semibold",
+  // The one control a page is built around — add to cart, place order.
+  lg: "min-h-12 gap-2 rounded-md px-7 py-3 text-body-lg font-semibold",
 };
 
 const BASE =
@@ -58,7 +60,7 @@ function classes({
     SIZES[size],
     block && "w-full",
     // Square when there is no label to give the box its width.
-    iconOnly && (size === "sm" ? "w-8 px-0" : "w-11 px-0"),
+    iconOnly && (size === "sm" ? "w-8 px-0" : size === "lg" ? "w-12 px-0" : "w-11 px-0"),
     className,
   );
 }

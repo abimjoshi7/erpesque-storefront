@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { useShopper } from "@/components/shopper-provider";
 import { Turnstile } from "@/components/turnstile";
@@ -15,10 +15,14 @@ import {
   Card,
   EmptyState,
   Field,
+  Icon,
   Input,
   Notice,
   QuantityStepper,
+  Spinner,
   Text,
+  cx,
+  type IconName,
 } from "@/design-system";
 import { useCart } from "@/lib/cart";
 import type { CartLine, PlacedOrder, Quote } from "@/lib/erp";
@@ -50,6 +54,13 @@ type Props = {
   /** Where to send a shopper whose session the ERP has just refused. */
   signInHref: string;
 };
+
+/**
+ * The delivery form's id. The submit button sits in the order summary, beside
+ * the total it commits to, rather than under the last field — so it reaches the
+ * form through the `form` attribute instead of by being inside it.
+ */
+const CHECKOUT_FORM = "checkout-form";
 
 /**
  * Asks the server to price the cart. Deliberately free of React state so the
@@ -116,6 +127,17 @@ export function CartView({ tenant, shopName, shopper, signInHref }: Props) {
     };
   }, [cartKey, lines, tenant]);
 
+  const checkout = useCheckout({
+    tenant,
+    shopper,
+    signInHref,
+    lines,
+    onPlaced: (order) => {
+      clear();
+      setPlaced(order);
+    },
+  });
+
   const current = result?.key === cartKey ? result : null;
   const quote = current?.quote ?? null;
   const quoteError = current?.error ?? null;
@@ -129,13 +151,11 @@ export function CartView({ tenant, shopName, shopper, signInHref }: Props) {
   if (lines.length === 0) {
     return (
       <EmptyState
+        className="mt-8"
+        icon={<Icon name="bag" className="size-12" />}
         title="Your cart is empty"
-        description="Nothing here yet. Anything you add is kept in this browser until you order."
-        action={
-          <ButtonLink href={`/${tenant}`} variant="secondary">
-            Browse {shopName}
-          </ButtonLink>
-        }
+        description={`Nothing here yet. Anything you add from ${shopName} is kept in this browser until you order.`}
+        action={<ButtonLink href={`/${tenant}`}>Continue shopping</ButtonLink>}
       />
     );
   }
@@ -143,66 +163,198 @@ export function CartView({ tenant, shopName, shopper, signInHref }: Props) {
   const currency = quote?.tenant.currency;
 
   const blockedSlug = quoteError ? slugNamedIn(quoteError, lines) : null;
+  const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
 
   return (
-    <section className="flex flex-col gap-10 lg:flex-row lg:items-start">
-      <div className="min-w-0 flex-1">
-        <ul className="divide-y divide-line border-y border-line">
-          {lines.map((line) => (
-            <CartRow
-              key={line.slug}
-              tenant={tenant}
-              line={line}
-              // Matched by slug rather than index: a failed quote returns no
-              // lines at all, and positions would silently mispair titles.
-              priced={quote?.lines.find((entry) => entry.slug === line.slug)}
-              currency={currency}
-              onQuantity={(quantity) => setQuantity(line.slug, quantity)}
-              onRemove={() => remove(line.slug)}
-            />
-          ))}
-        </ul>
+    <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start lg:gap-10 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="flex min-w-0 flex-col gap-6">
+        <Card
+          padding={false}
+          header={
+            <div className="flex items-baseline justify-between gap-4">
+              <Text as="h2" variant="headlineMedium">
+                Items
+              </Text>
+              <Text variant="bodySmall" tone="muted" className="tabular-nums">
+                {itemCount} {itemCount === 1 ? "item" : "items"}
+              </Text>
+            </div>
+          }
+        >
+          <ul className="divide-y divide-line">
+            {lines.map((line) => (
+              <CartRow
+                key={line.slug}
+                tenant={tenant}
+                line={line}
+                // Matched by slug rather than index: a failed quote returns no
+                // lines at all, and positions would silently mispair titles.
+                priced={quote?.lines.find((entry) => entry.slug === line.slug)}
+                currency={currency}
+                onQuantity={(quantity) => setQuantity(line.slug, quantity)}
+                onRemove={() => remove(line.slug)}
+              />
+            ))}
+          </ul>
+          <div className="border-t border-line px-2 py-2 sm:px-3">
+            <ButtonLink href={`/${tenant}`} variant="tertiary" size="sm">
+              <Icon name="arrow-left" className="size-4" />
+              Continue shopping
+            </ButtonLink>
+          </div>
+        </Card>
 
         {quoteError ? (
-          <Notice tone="critical" className="mt-6">
-            <p>{quoteError}</p>
-            {/* The ERP refuses the whole cart over one bad line, and until that
-                line goes the shopper cannot be quoted at all — so a message
-                with nothing to press is a dead end. The button only appears
-                when the refusal names something actually in this cart. */}
-            {blockedSlug ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                className="mt-3"
-                onClick={() => remove(blockedSlug)}
-              >
-                Remove it and carry on
-              </Button>
-            ) : null}
+          <Notice tone="critical">
+            <div className="flex gap-3">
+              <Icon name="alert" className="mt-px size-4" />
+              <div>
+                <p>{quoteError}</p>
+                {/* The ERP refuses the whole cart over one bad line, and until
+                    that line goes the shopper cannot be quoted at all — so a
+                    message with nothing to press is a dead end. The button only
+                    appears when the refusal names something actually in this
+                    cart. */}
+                {blockedSlug ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => remove(blockedSlug)}
+                  >
+                    Remove it and carry on
+                  </Button>
+                ) : null}
+              </div>
+            </div>
           </Notice>
         ) : null}
 
-        <Checkout
-          tenant={tenant}
-          shopper={shopper}
-          signInHref={signInHref}
-          disabled={pricing || !quote}
-          onPlaced={(order) => {
-            clear();
-            setPlaced(order);
-          }}
-          lines={lines}
-        />
+        <CheckoutForm shopper={shopper} onSubmit={checkout.submit} />
       </div>
 
       {/* Sticky only where there is height to spare. On a phone the summary
-          sits after the lines, which is the order a shopper reads them in. */}
-      <aside className="w-full lg:sticky lg:top-6 lg:w-80 lg:shrink-0">
-        <Summary quote={quote} currency={currency} pricing={pricing} />
+          sits after the lines and the form, which is the order a shopper reads
+          them in — and puts the button that places the order last. */}
+      <aside className="w-full lg:sticky lg:top-24">
+        <Summary quote={quote} currency={currency} pricing={pricing} itemCount={itemCount}>
+          <Turnstile onToken={checkout.setTurnstileToken} resetSignal={checkout.turnstileNonce} />
+
+          {checkout.error ? <Notice tone="critical">{checkout.error}</Notice> : null}
+
+          <Button
+            type="submit"
+            form={CHECKOUT_FORM}
+            size="lg"
+            block
+            disabled={pricing || !quote || !checkout.tokenReady}
+            loading={checkout.submitting}
+          >
+            {checkout.submitting ? "Placing order…" : "Place order"}
+          </Button>
+
+          <ul className="flex flex-col gap-2.5 text-body-sm text-ink-subdued">
+            <Assurance icon="cash">Payment is on delivery.</Assurance>
+            <Assurance icon="shield">
+              Prices are checked against the shop&rsquo;s live catalog as your order is
+              placed.
+            </Assurance>
+          </ul>
+        </Summary>
       </aside>
-    </section>
+    </div>
   );
+}
+
+/**
+ * The delivery form's state and its submit.
+ *
+ * A hook rather than a component because its two halves render in different
+ * places: the fields sit with the cart lines, and the button, the challenge and
+ * any refusal sit in the order summary beside the total being committed to.
+ *
+ * A 401 means the ERP no longer accepts the session. The shopper is sent to
+ * sign in and brought back here; the cart is in localStorage and is not
+ * touched, so nothing they chose is lost on the way.
+ */
+function useCheckout({
+  tenant,
+  shopper,
+  signInHref,
+  lines,
+  onPlaced,
+}: {
+  tenant: string;
+  shopper: CheckoutShopper | null;
+  signInHref: string;
+  lines: { slug: string; quantity: number }[];
+  onPlaced: (order: PlacedOrder) => void;
+}) {
+  const router = useRouter();
+  const { refresh } = useShopper();
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // Bumped after every failed submit. The token Cloudflare issued has been
+  // spent by then, and re-sending it would fail as a replay — which would look
+  // to the shopper like their corrected address was rejected too.
+  const [turnstileNonce, setTurnstileNonce] = useState(0);
+  // With a site key configured the ERP refuses an order without a token, so the
+  // button waits for one rather than inviting a submit that is certain to fail.
+  const needsToken = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/${tenant}/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lines,
+          contact: {
+            name: form.get("name"),
+            phone: shopper?.phone ?? form.get("phone"),
+            address: form.get("address"),
+            landmark: form.get("landmark"),
+          },
+          note: form.get("note"),
+          turnstileToken,
+        }),
+      });
+      const body = (await response.json()) as { data?: PlacedOrder; error?: string };
+      if (response.status === 401) {
+        // The handler has already dropped the dead cookie. The shared
+        // shopper state is told too, so the header stops naming someone
+        // who is no longer signed in.
+        await refresh();
+        router.push(signInHref);
+        return;
+      }
+      if (!response.ok || !body.data) {
+        setError(body.error ?? "Could not place your order.");
+        setTurnstileNonce((nonce) => nonce + 1);
+        return;
+      }
+      onPlaced(body.data);
+    } catch {
+      setError("Could not reach the shop. Check your connection.");
+      setTurnstileNonce((nonce) => nonce + 1);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return {
+    submit,
+    submitting,
+    error,
+    setTurnstileToken,
+    turnstileNonce,
+    tokenReady: !needsToken || Boolean(turnstileToken),
+  };
 }
 
 /**
@@ -231,14 +383,14 @@ function CartRow({
   const image = priced?.image ? mediaHref(tenant, priced.image) : null;
 
   return (
-    <li className="flex gap-4 py-4">
+    <li className="flex gap-4 p-4 sm:gap-5 sm:p-5">
       <Link
         href={`/${tenant}/product/${line.slug}`}
         // Decorative here: the title beside it is the same link, and a screen
         // reader announcing the product twice per row makes a cart tedious.
         tabIndex={-1}
         aria-hidden="true"
-        className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface-subdued"
+        className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-line bg-media p-1.5 sm:size-24"
       >
         {image ? (
           // eslint-disable-next-line @next/next/no-img-element -- see the note on ProductCard.
@@ -248,61 +400,71 @@ function CartRow({
         )}
       </Link>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <Link
-          href={`/${tenant}/product/${line.slug}`}
-          className="text-title font-semibold text-ink-strong hover:underline hover:underline-offset-4"
-        >
-          {title}
-        </Link>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <Link
+              href={`/${tenant}/product/${line.slug}`}
+              className="line-clamp-2 text-title font-semibold text-ink-strong hover:underline hover:underline-offset-4"
+            >
+              {title}
+            </Link>
 
-        {priced && currency ? (
-          <Text variant="bodySmall" tone="subdued" className="tabular-nums">
-            {formatPrice(priced.unitPriceMinor, currency)} each
-          </Text>
-        ) : null}
+            {priced && currency ? (
+              <Text variant="bodySmall" tone="subdued" className="mt-0.5 tabular-nums">
+                {formatPrice(priced.unitPriceMinor, currency)} each
+              </Text>
+            ) : null}
+          </div>
+
+          {priced && currency ? (
+            <Text variant="titleLarge" tone="strong" className="shrink-0 text-right tabular-nums">
+              {formatPrice(priced.lineTotalMinor, currency)}
+            </Text>
+          ) : null}
+        </div>
 
         {/* Multi-buy savings are shown, not silently applied. A total lower
             than price × quantity looks like a mistake unless the shopper is
             told why it is lower. */}
         {priced?.discountMinor && currency ? (
-          <Text variant="bodySmall" tone="success" className="tabular-nums">
+          <Text variant="bodySmall" tone="success" className="mt-1 tabular-nums">
             Multi-buy saving {formatPrice(priced.discountMinor, currency)}
           </Text>
         ) : null}
 
         {priced?.availability ? (
-          <div className="mt-0.5">
+          <div className="mt-2">
             <AvailabilityBadge availability={priced.availability} />
           </div>
         ) : null}
 
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
           <QuantityStepper
             size="sm"
             value={line.quantity}
             onChange={onQuantity}
             label={`Quantity of ${title}`}
           />
-          <Button variant="tertiary" size="sm" onClick={onRemove}>
+          <Button
+            variant="tertiary"
+            size="sm"
+            icon={<Icon name="trash" className="size-4" />}
+            onClick={onRemove}
+            // Names the product: a column of identical "Remove" buttons is a
+            // guessing game for anyone moving through them by keyboard.
+            aria-label={`Remove ${title}`}
+          >
             Remove
           </Button>
         </div>
-      </div>
-
-      <div className="shrink-0 text-right">
-        {priced && currency ? (
-          <Text variant="titleLarge" tone="strong" className="tabular-nums">
-            {formatPrice(priced.lineTotalMinor, currency)}
-          </Text>
-        ) : null}
       </div>
     </li>
   );
 }
 
 /**
- * What the basket comes to.
+ * What the basket comes to, with the controls that commit to it underneath.
  *
  * Every figure is the server's. While a re-quote is in flight the last good
  * total stays on screen dimmed rather than disappearing — a total that blinks
@@ -312,73 +474,101 @@ function Summary({
   quote,
   currency,
   pricing,
+  itemCount,
+  children,
 }: {
   quote: Quote | null;
   currency: Quote["tenant"]["currency"] | undefined;
   pricing: boolean;
+  itemCount: number;
+  children: ReactNode;
 }) {
-  if (!quote || !currency) {
-    return (
-      <Card>
-        <Text variant="bodySmall" tone="muted">
-          {pricing ? "Pricing your cart…" : "Your total will appear here."}
-        </Text>
-      </Card>
-    );
-  }
-
   return (
     <Card
+      padding={false}
       header={
         <Text as="h2" variant="headlineMedium">
           Order summary
         </Text>
       }
-      className={pricing ? "opacity-60 transition-opacity" : "transition-opacity"}
     >
-      <dl className="space-y-2 text-body-sm">
-        <div className="flex justify-between gap-4">
-          <dt className="text-ink-subdued">Items</dt>
-          <dd className="tabular-nums">{formatPrice(itemsTotal(quote), currency)}</dd>
-        </div>
-
-        {quote.delivery ? (
-          <div className="flex justify-between gap-4">
-            <dt className="text-ink-subdued">{quote.delivery.title}</dt>
-            <dd className="tabular-nums">
-              {quote.delivery.waived
-                ? "Free"
-                : formatPrice(quote.delivery.amountMinor, currency)}
-            </dd>
+      <div
+        className={cx(
+          "p-4 transition-opacity sm:p-5",
+          pricing && quote ? "opacity-60" : undefined,
+        )}
+      >
+        {!quote || !currency ? (
+          <div className="flex items-center gap-2 text-ink-muted">
+            {pricing ? <Spinner className="size-3.5" label="" /> : null}
+            <Text variant="bodySmall" tone="inherit">
+              {pricing ? "Pricing your cart…" : "Your total will appear here."}
+            </Text>
           </div>
-        ) : null}
+        ) : (
+          <>
+            <dl className="space-y-2.5 text-body-sm">
+              <div className="flex justify-between gap-4">
+                <dt className="text-ink-subdued">
+                  Items <span className="tabular-nums">({itemCount})</span>
+                </dt>
+                <dd className="tabular-nums">{formatPrice(itemsTotal(quote), currency)}</dd>
+              </div>
 
-        <div className="flex justify-between gap-4 border-t border-line pt-2 text-title font-semibold text-ink-strong">
-          <dt>Total</dt>
-          <dd className="tabular-nums">{formatPrice(quote.totalMinor, currency)}</dd>
-        </div>
-      </dl>
+              {quote.delivery ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-ink-subdued">{quote.delivery.title}</dt>
+                  <dd className="tabular-nums">
+                    {quote.delivery.waived ? (
+                      <span className="font-semibold text-success">Free</span>
+                    ) : (
+                      formatPrice(quote.delivery.amountMinor, currency)
+                    )}
+                  </dd>
+                </div>
+              ) : null}
 
-      {/* Not a row of its own: the ERP folds tax into every figure above, so a
-          "Tax" line here would read as something still to be added. */}
-      {quote.taxMinor > 0 ? (
-        <Text variant="caption" tone="muted" className="mt-3 tabular-nums">
-          Includes {formatPrice(quote.taxMinor, currency)} tax.
-        </Text>
-      ) : null}
+              <div className="flex items-baseline justify-between gap-4 border-t border-line pt-3 text-ink-strong">
+                <dt className="text-title font-semibold">Total</dt>
+                <dd className="text-h3 font-bold tabular-nums">
+                  {formatPrice(quote.totalMinor, currency)}
+                </dd>
+              </div>
+            </dl>
 
-      <Text variant="caption" tone="muted" className="mt-1">
-        Payment is on delivery.
-        {quote.delivery && !quote.delivery.waived && quote.delivery.freeOverMinor
-          ? ` Delivery is free over ${formatPrice(quote.delivery.freeOverMinor, currency)}.`
-          : ""}
-      </Text>
+            {/* Not a row of its own: the ERP folds tax into every figure above,
+                so a "Tax" line here would read as something still to be added. */}
+            {quote.taxMinor > 0 ? (
+              <Text variant="caption" tone="muted" className="mt-2 tabular-nums">
+                Includes {formatPrice(quote.taxMinor, currency)} tax.
+              </Text>
+            ) : null}
+
+            {quote.delivery && !quote.delivery.waived && quote.delivery.freeOverMinor ? (
+              <Text variant="caption" tone="muted" className="mt-1 tabular-nums">
+                Delivery is free over {formatPrice(quote.delivery.freeOverMinor, currency)}.
+              </Text>
+            ) : null}
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-4 border-t border-line p-4 sm:p-5">{children}</div>
     </Card>
   );
 }
 
+function Assurance({ icon, children }: { icon: IconName; children: ReactNode }) {
+  return (
+    <li className="flex gap-2.5">
+      <Icon name={icon} className="mt-px size-4 text-ink-muted" />
+      <span>{children}</span>
+    </li>
+  );
+}
+
 /**
- * The delivery form and the submit.
+ * The delivery form.
  *
  * For a signed-in shopper the fields start from the account: the name the shop
  * has for them and the address and landmark from their last order, all of it
@@ -392,154 +582,118 @@ function Summary({
  * verified phone, and the rider still needs one to call, so for them the phone
  * is an ordinary required field and their verified address is shown instead,
  * read-only, as the identity the order is placed under.
- *
- * A 401 means the ERP no longer accepts the session. The shopper is sent to
- * sign in and brought back here; the cart is in localStorage and is not
- * touched, so nothing they chose is lost on the way.
  */
-function Checkout({
-  tenant,
+function CheckoutForm({
   shopper,
-  signInHref,
-  lines,
-  disabled,
-  onPlaced,
+  onSubmit,
 }: {
-  tenant: string;
   shopper: CheckoutShopper | null;
-  signInHref: string;
-  lines: { slug: string; quantity: number }[];
-  disabled: boolean;
-  onPlaced: (order: PlacedOrder) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const router = useRouter();
-  const { refresh } = useShopper();
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  // Bumped after every failed submit. The token Cloudflare issued has been
-  // spent by then, and re-sending it would fail as a replay — which would look
-  // to the shopper like their corrected address was rejected too.
-  const [turnstileNonce, setTurnstileNonce] = useState(0);
-  // With a site key configured the ERP refuses an order without a token, so the
-  // button waits for one rather than inviting a submit that is certain to fail.
-  const needsToken = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
-
   return (
-    <form
-      className="mt-10 flex flex-col gap-4 border-t border-line pt-8"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        const form = new FormData(event.currentTarget);
-        setSubmitting(true);
-        setError(null);
-        try {
-          const response = await fetch(`/api/${tenant}/order`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              lines,
-              contact: {
-                name: form.get("name"),
-                phone: shopper?.phone ?? form.get("phone"),
-                address: form.get("address"),
-                landmark: form.get("landmark"),
-              },
-              note: form.get("note"),
-              turnstileToken,
-            }),
-          });
-          const body = (await response.json()) as { data?: PlacedOrder; error?: string };
-          if (response.status === 401) {
-            // The handler has already dropped the dead cookie. The shared
-            // shopper state is told too, so the header stops naming someone
-            // who is no longer signed in.
-            await refresh();
-            router.push(signInHref);
-            return;
-          }
-          if (!response.ok || !body.data) {
-            setError(body.error ?? "Could not place your order.");
-            setTurnstileNonce((nonce) => nonce + 1);
-            return;
-          }
-          onPlaced(body.data);
-        } catch {
-          setError("Could not reach the shop. Check your connection.");
-          setTurnstileNonce((nonce) => nonce + 1);
-        } finally {
-          setSubmitting(false);
-        }
-      }}
-    >
-      <Text as="h2" variant="headlineLarge">
-        Delivery details
-      </Text>
-
-      <CheckoutField
-        name="name"
-        label="Your name"
-        required
-        autoComplete="name"
-        defaultValue={shopper?.name ?? undefined}
-      />
-      {shopper?.email ? (
-        <CheckoutField
-          name="email"
-          label="Email"
-          type="email"
-          value={shopper.email}
-          readOnly
-          hint="Verified with the code we sent. This order is placed under it."
-        />
-      ) : null}
-      {shopper?.phone ? (
-        <CheckoutField
-          name="phone"
-          label="Phone"
-          type="tel"
-          value={shopper.phone}
-          readOnly
-          hint="Verified with the code we sent. Sign out to order with another number."
-        />
-      ) : (
-        <CheckoutField
-          name="phone"
-          label="Phone"
-          required
-          type="tel"
-          autoComplete="tel"
-          hint={shopper ? "For the rider to call when they arrive." : undefined}
-        />
-      )}
-      <CheckoutField
-        name="address"
-        label="Delivery address"
-        required
-        autoComplete="street-address"
-        defaultValue={shopper?.address ?? undefined}
-      />
-      <CheckoutField
-        name="landmark"
-        label="Landmark"
-        hint="A shop or crossing the rider will know."
-        defaultValue={shopper?.landmark ?? undefined}
-      />
-      <CheckoutField name="note" label="Anything the shop should know" />
-
-      <Turnstile onToken={setTurnstileToken} resetSignal={turnstileNonce} />
-
-      {error ? <Notice tone="critical">{error}</Notice> : null}
-
-      <Button
-        type="submit"
-        className="self-start"
-        disabled={disabled || (needsToken && !turnstileToken)}
-        loading={submitting}
+    <form id={CHECKOUT_FORM} onSubmit={onSubmit} className="flex flex-col gap-6">
+      <CheckoutSection
+        icon="user"
+        title="Contact"
+        description="Who the shop calls to confirm before delivering."
       >
-        {submitting ? "Placing order…" : "Place order"}
-      </Button>
+        <CheckoutField
+          name="name"
+          label="Your name"
+          required
+          autoComplete="name"
+          defaultValue={shopper?.name ?? undefined}
+        />
+        {shopper?.phone ? (
+          <CheckoutField
+            name="phone"
+            label="Phone"
+            type="tel"
+            value={shopper.phone}
+            readOnly
+            hint="Verified with the code we sent. Sign out to order with another number."
+          />
+        ) : (
+          <CheckoutField
+            name="phone"
+            label="Phone"
+            required
+            type="tel"
+            autoComplete="tel"
+            hint={shopper ? "For the rider to call when they arrive." : undefined}
+          />
+        )}
+        {shopper?.email ? (
+          <CheckoutField
+            name="email"
+            label="Email"
+            type="email"
+            value={shopper.email}
+            readOnly
+            hint="Verified with the code we sent. This order is placed under it."
+            wide
+          />
+        ) : null}
+      </CheckoutSection>
+
+      <CheckoutSection
+        icon="truck"
+        title="Delivery"
+        description="Where the rider brings your order."
+      >
+        <CheckoutField
+          name="address"
+          label="Delivery address"
+          required
+          autoComplete="street-address"
+          defaultValue={shopper?.address ?? undefined}
+          wide
+        />
+        <CheckoutField
+          name="landmark"
+          label="Landmark"
+          hint="A shop or crossing the rider will know."
+          defaultValue={shopper?.landmark ?? undefined}
+          wide
+        />
+        <CheckoutField name="note" label="Anything the shop should know" wide />
+      </CheckoutSection>
     </form>
+  );
+}
+
+function CheckoutSection({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon: IconName;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card
+      padding={false}
+      header={
+        <div className="flex items-center gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-subdued text-ink-subdued">
+            <Icon name={icon} className="size-4.5" />
+          </span>
+          <div>
+            <Text as="h2" variant="headlineMedium">
+              {title}
+            </Text>
+            <Text variant="caption" tone="muted">
+              {description}
+            </Text>
+          </div>
+        </div>
+      }
+    >
+      <div className="grid gap-5 p-4 sm:grid-cols-2 sm:p-5">{children}</div>
+    </Card>
   );
 }
 
@@ -566,6 +720,7 @@ function CheckoutField({
   defaultValue,
   value,
   readOnly,
+  wide,
 }: {
   name: string;
   label: string;
@@ -578,9 +733,17 @@ function CheckoutField({
   /** Fixed, with `readOnly`: shown and submitted, but not the shopper's to edit. */
   value?: string;
   readOnly?: boolean;
+  /** Spans both columns on a wide screen — an address does not fit half a row. */
+  wide?: boolean;
 }) {
   return (
-    <Field id={`checkout-${name}`} label={label} required={required} hint={hint}>
+    <Field
+      id={`checkout-${name}`}
+      label={label}
+      required={required}
+      hint={hint}
+      className={wide ? "sm:col-span-2" : undefined}
+    >
       {(control) => (
         <Input
           {...control}
@@ -593,7 +756,7 @@ function CheckoutField({
           readOnly={readOnly}
           // A variant rather than a plain override: `bg-surface` in the base
           // classes would otherwise win or lose on stylesheet order alone.
-          className="read-only:bg-surface-subdued read-only:text-ink-subdued"
+          className="min-h-11 read-only:bg-surface-subdued read-only:text-ink-subdued"
         />
       )}
     </Field>
@@ -610,57 +773,80 @@ function OrderPlaced({
   signedIn: boolean;
 }) {
   return (
-    <section className="flex flex-col gap-4">
-      <Text as="h2" variant="displayMedium">
-        Order {order.orderNumber} received
-      </Text>
-      <Text variant="bodyLarge" tone="subdued">
-        The shop will call you to confirm before delivering. Payment is on delivery.
-      </Text>
-      {order.currency ? (
-        <Text variant="titleLarge" tone="strong" className="tabular-nums">
-          Total: {formatPrice(order.totalMinor, order.currency)}
-        </Text>
-      ) : null}
+    <section className="mx-auto mt-8 max-w-2xl">
+      <Card padding={false} elevation="md">
+        <div className="flex flex-col items-center gap-3 px-6 pt-10 pb-8 text-center sm:px-10">
+          <span className="flex size-14 items-center justify-center rounded-full bg-success-soft text-success">
+            <Icon name="check" className="size-7" />
+          </span>
+          <Text as="h2" variant="displayMedium" className="mt-2 text-balance">
+            Order {order.orderNumber} received
+          </Text>
+          <Text variant="bodyLarge" tone="subdued" className="max-w-md">
+            The shop will call you to confirm before delivering. Payment is on delivery.
+          </Text>
+          {order.currency ? (
+            <div className="mt-3 rounded-md bg-surface-subdued px-5 py-3">
+              <Text variant="caption" tone="muted">
+                Total
+              </Text>
+              <Text variant="displayMedium" as="p" className="tabular-nums">
+                {formatPrice(order.totalMinor, order.currency)}
+              </Text>
+            </div>
+          ) : null}
+        </div>
 
-      {/*
-        The status link is shown once, here, and never emailed or stored: this
-        is the only copy the shopper will get, because the shop keeps a hash of
-        the token rather than the token. Worth saying so plainly — otherwise
-        someone closes the tab and has no way back to their own order.
-      */}
-      <Notice tone="info">
-        <p>
-          <Link
-            href={`/${tenant}/order/${order.statusToken}`}
-            className="font-semibold underline underline-offset-4"
-          >
-            Track or cancel this order
-          </Link>
-        </p>
-        {/* A signed-in order is in the account's history as well, so the link
-            is no longer the only way back — but it is still the only way to
-            cancel, which the account pages cannot do yet. */}
-        <p className="mt-1">
-          {signedIn ? (
-            <>
-              It is also in{" "}
-              <Link href={`/${tenant}/account`} className="underline underline-offset-4">
-                your orders
-              </Link>
-              . Keep this link if you may want to cancel — cancelling happens there.
-            </>
-          ) : (
-            "Save this link — it is the only way back to your order, and it is not sent anywhere else."
-          )}
-        </p>
-      </Notice>
+        <div className="flex flex-col gap-5 border-t border-line p-6 sm:px-10">
+          {/*
+            The status link is shown once, here, and never emailed or stored: this
+            is the only copy the shopper will get, because the shop keeps a hash of
+            the token rather than the token. Worth saying so plainly — otherwise
+            someone closes the tab and has no way back to their own order.
+          */}
+          <Notice tone="info">
+            <div className="flex gap-3">
+              <Icon name="info" className="mt-px size-4" />
+              <div>
+                <p>
+                  <Link
+                    href={`/${tenant}/order/${order.statusToken}`}
+                    className="font-semibold underline underline-offset-4"
+                  >
+                    Track or cancel this order
+                  </Link>
+                </p>
+                {/* A signed-in order is in the account's history as well, so the
+                    link is no longer the only way back — but it is still the only
+                    way to cancel, which the account pages cannot do yet. */}
+                <p className="mt-1">
+                  {signedIn ? (
+                    <>
+                      It is also in{" "}
+                      <Link
+                        href={`/${tenant}/account`}
+                        className="underline underline-offset-4"
+                      >
+                        your orders
+                      </Link>
+                      . Keep this link if you may want to cancel — cancelling happens
+                      there.
+                    </>
+                  ) : (
+                    "Save this link — it is the only way back to your order, and it is not sent anywhere else."
+                  )}
+                </p>
+              </div>
+            </div>
+          </Notice>
 
-      <div>
-        <ButtonLink href={`/${tenant}`} variant="secondary">
-          Keep shopping
-        </ButtonLink>
-      </div>
+          <div className="flex justify-center">
+            <ButtonLink href={`/${tenant}`} variant="secondary">
+              Keep shopping
+            </ButtonLink>
+          </div>
+        </div>
+      </Card>
     </section>
   );
 }

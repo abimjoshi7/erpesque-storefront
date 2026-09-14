@@ -2,7 +2,15 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 
-import { Card, EmptyState, StatusPill, Text } from "@/design-system";
+import {
+  ButtonLink,
+  Card,
+  Container,
+  EmptyState,
+  Icon,
+  StatusPill,
+  Text,
+} from "@/design-system";
 import { fetchOrders, fetchShopperSession, isUnauthorized } from "@/lib/erp";
 import { formatPrice } from "@/lib/money";
 import { formatOrderDate, statusCopy } from "@/lib/order-status";
@@ -60,103 +68,151 @@ export default async function AccountPage({
   // phone, one by email, which are separate accounts for now — can tell which
   // history they are looking at.
   const signedInAs = shopper?.shopper.phone ?? shopper?.shopper.email;
+  const name = shopper?.shopper.name;
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-12">
-      <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <Text as="h1" variant="displayMedium">
-          Your orders
-        </Text>
-        <SignOut tenant={tenant} />
+    <Container as="main" className="py-8 sm:py-12">
+      <div className="mx-auto max-w-3xl">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-4">
+            <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-surface-subdued text-ink-subdued">
+              <Icon name="user" className="size-6" />
+            </span>
+            <div className="min-w-0">
+              <Text as="h1" variant="displayMedium">
+                Your orders
+              </Text>
+              {signedInAs ? (
+                <Text variant="bodySmall" tone="muted" className="mt-0.5 truncate">
+                  Signed in as{" "}
+                  <span className="font-medium text-ink">
+                    {name ? `${name} · ${signedInAs}` : signedInAs}
+                  </span>
+                </Text>
+              ) : null}
+            </div>
+          </div>
+          <SignOut tenant={tenant} />
+        </div>
+
+        {history.orders.length === 0 ? (
+          <EmptyState
+            icon={<Icon name="package" className="size-12" />}
+            title="No orders yet"
+            description="Anything you order from this shop will show up here."
+            action={<ButtonLink href={`/${tenant}`}>Start shopping</ButtonLink>}
+            className="mt-10"
+          />
+        ) : (
+          <Card
+            padding={false}
+            className="mt-8"
+            header={
+              <div className="flex items-baseline justify-between gap-4">
+                <Text as="h2" variant="headlineMedium">
+                  Order history
+                </Text>
+                <Text variant="bodySmall" tone="muted" className="tabular-nums">
+                  {history.total} {history.total === 1 ? "order" : "orders"}
+                </Text>
+              </div>
+            }
+          >
+            <ul className="divide-y divide-line">
+              {history.orders.map((order, index) => {
+                const copy = statusCopy(order.status);
+                // Each row carries its own currency rather than borrowing the
+                // tenant's, so a total always renders in the money the order was
+                // actually written in.
+                const total = order.currency
+                  ? formatPrice(order.totalMinor, order.currency)
+                  : null;
+                const body = (
+                  <>
+                    <span className="hidden size-10 shrink-0 items-center justify-center rounded-md bg-surface-subdued text-ink-subdued sm:flex">
+                      <Icon name="package" className="size-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <Text variant="titleLarge" tone="strong">
+                          {order.orderNumber ?? "Order"}
+                        </Text>
+                        <StatusPill tone={copy.tone}>{copy.label}</StatusPill>
+                      </div>
+                      <Text variant="bodySmall" tone="muted" className="mt-1">
+                        {order.orderDate ? formatOrderDate(order.orderDate) : null}
+                        {order.lineCount
+                          ? ` · ${order.lineCount} item${order.lineCount === 1 ? "" : "s"}`
+                          : null}
+                      </Text>
+                    </div>
+                    <Text variant="titleLarge" tone="strong" className="shrink-0 tabular-nums">
+                      {total}
+                    </Text>
+                  </>
+                );
+
+                return (
+                  <li key={order.orderNumber ?? `row-${index}`}>
+                    {/* The number is what opens the order, so a row without one
+                        is shown and not linked rather than hidden — the shopper
+                        still spent that money. */}
+                    {order.orderNumber ? (
+                      <Link
+                        href={`/${tenant}/account/orders/${encodeURIComponent(order.orderNumber)}`}
+                        className="group flex items-center gap-4 px-4 py-4 transition-colors duration-(--duration-fast) ease-standard hover:bg-surface-subdued sm:px-5"
+                      >
+                        {body}
+                        <Icon
+                          name="chevron-right"
+                          className="size-4 text-ink-disabled transition-colors group-hover:text-ink-strong"
+                        />
+                      </Link>
+                    ) : (
+                      <div className="flex items-center gap-4 px-4 py-4 sm:px-5">{body}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+        )}
+
+        {history.totalPages > 1 ? (
+          <nav
+            className="mt-8 flex items-center justify-between gap-4"
+            aria-label="Order history pages"
+          >
+            {page > 1 ? (
+              <ButtonLink
+                href={`/${tenant}/account?page=${page - 1}`}
+                variant="secondary"
+                size="sm"
+              >
+                <Icon name="chevron-left" className="size-4" />
+                Newer
+              </ButtonLink>
+            ) : (
+              <span />
+            )}
+            <Text variant="bodySmall" tone="muted" className="tabular-nums">
+              Page {history.page} of {history.totalPages}
+            </Text>
+            {page < history.totalPages ? (
+              <ButtonLink
+                href={`/${tenant}/account?page=${page + 1}`}
+                variant="secondary"
+                size="sm"
+              >
+                Older
+                <Icon name="chevron-right" className="size-4" />
+              </ButtonLink>
+            ) : (
+              <span />
+            )}
+          </nav>
+        ) : null}
       </div>
-      {signedInAs ? (
-        <Text variant="bodySmall" tone="muted" className="mt-2">
-          Signed in as {signedInAs}
-        </Text>
-      ) : null}
-
-      {history.orders.length === 0 ? (
-        <EmptyState
-          title="No orders yet"
-          description="Anything you order from this shop will show up here."
-          className="mt-10"
-        />
-      ) : (
-        <ul className="mt-8 flex flex-col gap-3">
-          {history.orders.map((order, index) => {
-            const copy = statusCopy(order.status);
-            // Each row carries its own currency rather than borrowing the
-            // tenant's, so a total always renders in the money the order was
-            // actually written in.
-            const total = order.currency
-              ? formatPrice(order.totalMinor, order.currency)
-              : null;
-            const body = (
-              <>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <Text variant="titleSmall" className="font-semibold">
-                    {order.orderNumber ?? "Order"}
-                  </Text>
-                  <StatusPill tone={copy.tone}>{copy.label}</StatusPill>
-                </div>
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <Text variant="bodySmall" tone="muted">
-                    {order.orderDate ? formatOrderDate(order.orderDate) : null}
-                    {order.lineCount
-                      ? ` · ${order.lineCount} item${order.lineCount === 1 ? "" : "s"}`
-                      : null}
-                  </Text>
-                  <Text variant="bodySmall" className="tabular-nums font-semibold">
-                    {total}
-                  </Text>
-                </div>
-              </>
-            );
-
-            return (
-              <li key={order.orderNumber ?? `row-${index}`}>
-                <Card padding={false}>
-                  {/* The number is what opens the order, so a row without one
-                      is shown and not linked rather than hidden — the shopper
-                      still spent that money. */}
-                  {order.orderNumber ? (
-                    <Link
-                      href={`/${tenant}/account/orders/${encodeURIComponent(order.orderNumber)}`}
-                      className="flex flex-col gap-2 rounded-lg p-4 transition-colors hover:bg-surface-subdued"
-                    >
-                      {body}
-                    </Link>
-                  ) : (
-                    <div className="flex flex-col gap-2 p-4">{body}</div>
-                  )}
-                </Card>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {history.totalPages > 1 ? (
-        <nav className="mt-8 flex items-center justify-between" aria-label="Order history pages">
-          {page > 1 ? (
-            <Link href={`/${tenant}/account?page=${page - 1}`} className="text-body-sm underline">
-              Newer
-            </Link>
-          ) : (
-            <span />
-          )}
-          <Text variant="caption" tone="muted">
-            Page {history.page} of {history.totalPages}
-          </Text>
-          {page < history.totalPages ? (
-            <Link href={`/${tenant}/account?page=${page + 1}`} className="text-body-sm underline">
-              Older
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      ) : null}
-    </main>
+    </Container>
   );
 }

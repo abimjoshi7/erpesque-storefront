@@ -33,7 +33,7 @@ export function SignOut({ tenant }: { tenant: string }) {
   }
 
   return (
-    <Button variant="tertiary" size="sm" onClick={signOut} loading={submitting}>
+    <Button variant="secondary" size="sm" onClick={signOut} loading={submitting}>
       {submitting ? "Signing out…" : "Sign out"}
     </Button>
   );

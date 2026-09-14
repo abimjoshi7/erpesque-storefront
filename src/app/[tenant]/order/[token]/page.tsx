@@ -1,12 +1,11 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
-import { StatusPill, Text } from "@/design-system";
+import { Container, Notice } from "@/design-system";
 import { fetchOrderStatus } from "@/lib/erp";
-import { formatPrice } from "@/lib/money";
-import { formatOrderDate, statusCopy } from "@/lib/order-status";
 
 import { CancelOrder } from "./cancel-button";
+import { OrderDetails } from "./order-details";
 
 type PageProps = {
   params: Promise<{ tenant: string; token: string }>;
@@ -39,81 +38,25 @@ export default async function OrderStatusPage({ params }: PageProps) {
   // whether an order number is real.
   if (!order) notFound();
 
-  const currency = order.currency;
-  const copy = statusCopy(order.status);
-
   return (
-    <main className="mx-auto max-w-2xl px-6 py-12">
-      <Text as="h1" variant="displayMedium">
-        Order {order.orderNumber ?? ""}
-      </Text>
-
-      {order.orderDate ? (
-        <Text variant="bodySmall" tone="muted" className="mt-1">
-          Placed {formatOrderDate(order.orderDate)}
-        </Text>
-      ) : null}
-
-      <div className="mt-4">
-        <StatusPill tone={copy.tone}>{copy.label}</StatusPill>
+    <Container as="main" className="py-8 sm:py-12">
+      <div className="mx-auto max-w-5xl">
+        <OrderDetails
+          order={order}
+          orderNumber=""
+          aside={
+            order.cancellable ? (
+              <CancelOrder tenant={tenant} token={token} />
+            ) : (
+              <Notice>
+                {order.status === "cancelled"
+                  ? "This order has been cancelled."
+                  : "The shop has started on this order, so it can no longer be cancelled here. Call them if something has changed."}
+              </Notice>
+            )
+          }
+        />
       </div>
-      <Text variant="bodyLarge" tone="subdued" className="mt-3">
-        {copy.detail}
-      </Text>
-
-      <section className="mt-8">
-        <Text as="h2" variant="labelSmall" tone="muted" className="uppercase">
-          What you ordered
-        </Text>
-        <ul className="mt-3 divide-y divide-line">
-          {(order.lines ?? []).map((line, index) => (
-            <li key={index} className="flex justify-between gap-4 py-3 text-body-sm">
-              <span>
-                {line.title}
-                {line.quantity && line.quantity !== 1 ? (
-                  <span className="text-ink-muted"> × {line.quantity}</span>
-                ) : null}
-              </span>
-              <span className="tabular-nums">
-                {currency ? formatPrice(line.lineTotalMinor ?? 0, currency) : null}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-4 flex justify-between border-t border-line pt-3 text-title font-semibold text-ink-strong">
-          <span>Total</span>
-          <span className="tabular-nums">
-            {currency ? formatPrice(order.totalMinor, currency) : null}
-          </span>
-        </p>
-        <Text variant="caption" tone="muted" className="mt-2">
-          Payment is on delivery.
-        </Text>
-      </section>
-
-      <section className="mt-8 text-body-sm text-ink">
-        <Text as="h2" variant="labelSmall" tone="muted" className="uppercase">
-          Delivering to
-        </Text>
-        <p className="mt-3">{order.contactName}</p>
-        <p>{order.deliveryAddress}</p>
-        {order.deliveryLandmark ? (
-          <p className="text-ink-muted">{order.deliveryLandmark}</p>
-        ) : null}
-        {order.note ? (
-          <p className="mt-3 text-ink-muted italic">“{order.note}”</p>
-        ) : null}
-      </section>
-
-      {order.cancellable ? (
-        <CancelOrder tenant={tenant} token={token} />
-      ) : (
-        <Text variant="bodySmall" tone="muted" className="mt-8">
-          {order.status === "cancelled"
-            ? "This order has been cancelled."
-            : "The shop has started on this order, so it can no longer be cancelled here. Call them if something has changed."}
-        </Text>
-      )}
-    </main>
+    </Container>
   );
 }

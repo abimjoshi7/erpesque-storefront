@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { Button, Input, Text } from "@/design-system";
+import { Button, Input, Text, cx } from "@/design-system";
 import { listingHref, withFilters, type ListingFilters } from "@/lib/catalog-url";
 import type { Tenant } from "@/lib/erp";
 
@@ -18,21 +18,35 @@ import type { Tenant } from "@/lib/erp";
  *
  * `page` is deliberately absent: narrowing a listing has to land on page 1,
  * because page 4 of the old results is usually past the end of the new ones.
+ *
+ * `idPrefix` exists because the catalog renders the filters twice — once in
+ * the desktop sidebar, once in the phone's disclosure — and two inputs sharing
+ * an id would leave one of the two labels pointing at the wrong box.
  */
 export function FilterPanel({
   tenant,
   filters,
   currency,
+  idPrefix = "filter",
+  className,
 }: {
   tenant: string;
   filters: ListingFilters;
   currency: NonNullable<Tenant["currency"]>;
+  idPrefix?: string;
+  className?: string;
 }) {
   const hasPrice = filters.minPrice !== undefined || filters.maxPrice !== undefined;
   const symbol = currency.symbol ?? currency.code ?? "";
+  const minId = `${idPrefix}-min-price`;
+  const maxId = `${idPrefix}-max-price`;
 
   return (
-    <form action={`/${encodeURIComponent(tenant)}`} method="get" className="mt-6">
+    <form
+      action={`/${encodeURIComponent(tenant)}`}
+      method="get"
+      className={cx("flex flex-col gap-5", className)}
+    >
       {filters.q ? <input type="hidden" name="q" value={filters.q} /> : null}
       {filters.category ? (
         <input type="hidden" name="category" value={filters.category} />
@@ -41,16 +55,16 @@ export function FilterPanel({
       {filters.sort ? <input type="hidden" name="sort" value={filters.sort} /> : null}
 
       <fieldset className="border-0 p-0">
-        <legend className="text-label font-semibold text-ink-muted uppercase">
-          Price ({symbol})
+        <legend className="text-body-sm font-semibold text-ink-strong">
+          Price <span className="font-normal text-ink-muted">({symbol})</span>
         </legend>
 
-        <div className="mt-2 flex items-center gap-2">
-          <label className="sr-only" htmlFor="filter-min-price">
+        <div className="mt-3 flex items-center gap-2">
+          <label className="sr-only" htmlFor={minId}>
             Minimum price in {symbol}
           </label>
           <Input
-            id="filter-min-price"
+            id={minId}
             // `inputMode` rather than `type="number"`: a spinner is useless at
             // shelf prices, and number inputs silently discard what they cannot
             // parse — a shopper mid-typing loses the digits they already have.
@@ -60,28 +74,38 @@ export function FilterPanel({
             placeholder="Min"
             defaultValue={filters.minPrice ?? ""}
             autoComplete="off"
-            className="w-full py-1.5 text-body-sm tabular-nums"
+            className="w-full py-2 text-body-sm tabular-nums"
           />
           <span className="text-ink-muted" aria-hidden="true">
             –
           </span>
-          <label className="sr-only" htmlFor="filter-max-price">
+          <label className="sr-only" htmlFor={maxId}>
             Maximum price in {symbol}
           </label>
           <Input
-            id="filter-max-price"
+            id={maxId}
             type="text"
             inputMode="decimal"
             name="maxPrice"
             placeholder="Max"
             defaultValue={filters.maxPrice ?? ""}
             autoComplete="off"
-            className="w-full py-1.5 text-body-sm tabular-nums"
+            className="w-full py-2 text-body-sm tabular-nums"
           />
         </div>
+
+        {/* States the active bound in the shop's own currency, because the two
+            boxes above show bare numbers and "100 – 500" is ambiguous about
+            whether it was applied. */}
+        {hasPrice ? (
+          <Text variant="caption" tone="muted" className="mt-2 tabular-nums">
+            Showing {filters.minPrice ? `${symbol} ${filters.minPrice}` : "any"} to{" "}
+            {filters.maxPrice ? `${symbol} ${filters.maxPrice}` : "any"}
+          </Text>
+        ) : null}
       </fieldset>
 
-      <label className="mt-4 flex items-center gap-2 text-body-sm text-ink-subdued">
+      <label className="flex cursor-pointer items-center gap-2.5 text-body-sm text-ink">
         <input
           type="checkbox"
           name="inStock"
@@ -95,9 +119,9 @@ export function FilterPanel({
         In stock only
       </label>
 
-      <div className="mt-4 flex items-center gap-3">
-        <Button type="submit" variant="secondary" size="sm">
-          Apply
+      <div className="flex items-center gap-3">
+        <Button type="submit" variant="secondary" size="sm" className="flex-1">
+          Apply filters
         </Button>
 
         {/* Only offered when there is something to clear. A permanently
@@ -119,16 +143,6 @@ export function FilterPanel({
           </Link>
         ) : null}
       </div>
-
-      {/* States the active bound in the shop's own currency, because the two
-          boxes above show bare numbers and "100 – 500" is ambiguous about
-          whether it was applied. */}
-      {hasPrice ? (
-        <Text variant="caption" tone="muted" className="mt-2 tabular-nums">
-          Showing {filters.minPrice ? `${symbol} ${filters.minPrice}` : "any"} to{" "}
-          {filters.maxPrice ? `${symbol} ${filters.maxPrice}` : "any"}
-        </Text>
-      ) : null}
     </form>
   );
 }

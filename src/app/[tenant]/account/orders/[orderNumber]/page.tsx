@@ -1,12 +1,10 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 
-import { StatusPill, Text } from "@/design-system";
+import { OrderDetails } from "@/app/[tenant]/order/[token]/order-details";
+import { Breadcrumbs, Container } from "@/design-system";
 import { fetchAccountOrder, isUnauthorized } from "@/lib/erp";
-import { formatPrice } from "@/lib/money";
 import { signInHref } from "@/lib/next-path";
-import { formatOrderDate, statusCopy } from "@/lib/order-status";
 import { readSession } from "@/lib/session";
 
 export const metadata: Metadata = {
@@ -26,8 +24,8 @@ export const dynamic = "force-dynamic";
  * lookup to the signed-in account, so another account's order number comes back
  * as the same 404 as one that was never issued.
  *
- * It renders from the same copy and the same helpers as the guest status page,
- * so the two describe an order identically.
+ * It renders from the same component as the guest status page, so the two
+ * describe an order identically.
  */
 export default async function AccountOrderPage({
   params,
@@ -52,75 +50,18 @@ export default async function AccountOrderPage({
 
   if (!order) notFound();
 
-  const currency = order.currency;
-  const copy = statusCopy(order.status);
-
   return (
-    <main className="mx-auto max-w-2xl px-6 py-12">
-      <Link href={`/${tenant}/account`} className="text-body-sm underline">
-        All your orders
-      </Link>
-
-      <Text as="h1" variant="displayMedium" className="mt-4">
-        Order {order.orderNumber ?? orderNumber}
-      </Text>
-
-      {order.orderDate ? (
-        <Text variant="bodySmall" tone="muted" className="mt-1">
-          Placed {formatOrderDate(order.orderDate)}
-        </Text>
-      ) : null}
-
-      <div className="mt-4">
-        <StatusPill tone={copy.tone}>{copy.label}</StatusPill>
+    <Container as="main" className="py-8 sm:py-12">
+      <div className="mx-auto max-w-5xl">
+        <Breadcrumbs
+          items={[
+            { label: "Home", href: `/${tenant}` },
+            { label: "Your orders", href: `/${tenant}/account` },
+            { label: `Order ${order.orderNumber ?? orderNumber}` },
+          ]}
+        />
+        <OrderDetails order={order} orderNumber={orderNumber} />
       </div>
-      <Text variant="bodyLarge" tone="subdued" className="mt-3">
-        {copy.detail}
-      </Text>
-
-      <section className="mt-8">
-        <Text as="h2" variant="labelSmall" tone="muted" className="uppercase">
-          What you ordered
-        </Text>
-        <ul className="mt-3 divide-y divide-line">
-          {(order.lines ?? []).map((line, index) => (
-            <li key={index} className="flex justify-between gap-4 py-3 text-body-sm">
-              <span>
-                {line.title}
-                {line.quantity && line.quantity !== 1 ? (
-                  <span className="text-ink-muted"> × {line.quantity}</span>
-                ) : null}
-              </span>
-              <span className="tabular-nums">
-                {currency ? formatPrice(line.lineTotalMinor ?? 0, currency) : null}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-4 flex justify-between border-t border-line pt-3 text-title font-semibold text-ink-strong">
-          <span>Total</span>
-          <span className="tabular-nums">
-            {currency ? formatPrice(order.totalMinor, currency) : null}
-          </span>
-        </p>
-        <Text variant="caption" tone="muted" className="mt-2">
-          Payment is on delivery.
-        </Text>
-      </section>
-
-      <section className="mt-8 text-body-sm text-ink">
-        <Text as="h2" variant="labelSmall" tone="muted" className="uppercase">
-          Delivering to
-        </Text>
-        <p className="mt-3">{order.contactName}</p>
-        <p>{order.deliveryAddress}</p>
-        {order.deliveryLandmark ? (
-          <p className="text-ink-muted">{order.deliveryLandmark}</p>
-        ) : null}
-        {order.note ? (
-          <p className="mt-3 text-ink-muted italic">“{order.note}”</p>
-        ) : null}
-      </section>
-    </main>
+    </Container>
   );
 }

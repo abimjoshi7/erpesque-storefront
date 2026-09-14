@@ -9,6 +9,9 @@ import { cx } from "@/design-system/cx";
  * scale gives it, so `variant="title"` reads the same on both platforms.
  */
 const VARIANTS = {
+  // Web-only, above the Flutter scale: a page's lead heading. Steps down to h1
+  // on a phone, where 36px would wrap a two-word product name onto three lines.
+  display: "text-h1 sm:text-display font-bold text-ink-strong",
   displayLarge: "text-h1 font-bold text-ink-strong",
   displayMedium: "text-h2 font-bold text-ink-strong",
   headlineLarge: "text-h3 font-bold text-ink-strong",

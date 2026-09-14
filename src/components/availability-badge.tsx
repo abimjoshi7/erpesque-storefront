@@ -1,4 +1,4 @@
-import { StatusPill, type StatusTone } from "@/design-system";
+import { StatusPill, cx, type StatusTone } from "@/design-system";
 import type { Product } from "@/lib/erp";
 
 type Availability = NonNullable<Product["availability"]>;
@@ -26,18 +26,45 @@ const TONES: Record<Availability, StatusTone> = {
   out_of_stock: "critical",
 };
 
+/** The same tones as ink alone, for the `inline` look. */
+const INK: Record<Availability, string> = {
+  in_stock: "text-success",
+  low_stock: "text-warning",
+  out_of_stock: "text-critical",
+};
+
 /**
  * Renders nothing when the ERP returned no availability — the shop has named no
  * location, or the item is not stock-tracked. That is "we cannot say", which is
  * not the same as zero, and inventing a badge for it would be a promise this
  * app is in no position to make.
+ *
+ * `inline` drops the pill's fill for a dot and a word. A grid of twenty-four
+ * cards each wearing a green lozenge turns the one thing a shopper needs to
+ * notice — the card that is *not* in stock — into noise among the rest.
  */
 export function AvailabilityBadge({
   availability,
+  variant = "pill",
 }: {
   availability: Product["availability"];
+  variant?: "pill" | "inline";
 }) {
   if (!availability) return null;
+
+  if (variant === "inline") {
+    return (
+      <span
+        className={cx(
+          "inline-flex items-center gap-1.5 text-caption font-medium whitespace-nowrap",
+          INK[availability],
+        )}
+      >
+        <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
+        {LABELS[availability]}
+      </span>
+    );
+  }
 
   return <StatusPill tone={TONES[availability]}>{LABELS[availability]}</StatusPill>;
 }

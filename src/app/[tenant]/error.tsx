@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Text } from "@/design-system";
+import { Button, Container, Icon, Text } from "@/design-system";
 
 /**
  * What a shopper sees when the ERP is unreachable or answers with something
@@ -27,24 +27,27 @@ export default function ShopError({
   retry: () => void;
 }) {
   return (
-    <main className="mx-auto max-w-2xl px-6 py-24">
-      <Text as="h1" variant="displayMedium">
+    <Container as="main" className="flex flex-col items-center py-20 text-center sm:py-28">
+      <span className="flex size-14 items-center justify-center rounded-full bg-warning-soft text-warning">
+        <Icon name="alert" className="size-7" />
+      </span>
+      <Text as="h1" variant="displayMedium" className="mt-6 text-balance">
         The shop is not answering
       </Text>
-      <Text variant="bodyLarge" tone="subdued" className="mt-3">
+      <Text variant="bodyLarge" tone="subdued" className="mt-3 max-w-md text-pretty">
         Something went wrong at our end, not yours. Nothing has been ordered and
         your cart is untouched.
       </Text>
-      <Button className="mt-6" onClick={() => retry()}>
+      <Button className="mt-8" onClick={() => retry()}>
         Try again
       </Button>
       {error.digest ? (
         // Only useful if the shopper reports it, and it is the one string that
         // ties their complaint to a line in the server log.
-        <Text variant="caption" tone="disabled" className="mt-6">
+        <Text variant="caption" tone="disabled" className="mt-8 font-mono">
           Reference {error.digest}
         </Text>
       ) : null}
-    </main>
+    </Container>
   );
 }

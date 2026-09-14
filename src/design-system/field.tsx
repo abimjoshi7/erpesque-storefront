@@ -3,7 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { cx } from "@/design-system/cx";
 
 export const inputClasses =
-  "w-full min-w-0 rounded-md border border-line-strong bg-surface px-3 py-2 text-body text-ink placeholder:text-ink-muted transition-colors duration-(--duration-fast) ease-standard hover:border-line-active focus:border-line-active disabled:opacity-50 aria-[invalid=true]:border-critical";
+  "w-full min-w-0 rounded-md border border-line-strong bg-surface px-3 py-2 text-body text-ink placeholder:text-ink-muted transition-colors duration-(--duration-fast) ease-standard hover:border-line-active focus:border-line-active focus:ring-1 focus:ring-line-active focus:outline-hidden disabled:opacity-50 aria-[invalid=true]:border-critical";
 
 /**
  * Layer 1 — text input.

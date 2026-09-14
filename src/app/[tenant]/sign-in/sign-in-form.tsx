@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { useShopper } from "@/components/shopper-provider";
 import { Turnstile } from "@/components/turnstile";
-import { Button, Field, Input, Notice, Text } from "@/design-system";
+import { Button, Field, Icon, Input, Notice, Text, cx } from "@/design-system";
 import type { LoginIdentifier, SignInChannel } from "@/lib/erp";
 import { safeNext } from "@/lib/next-path";
 
@@ -186,7 +186,9 @@ export function SignInForm({
   }
 
   return (
-    <div className="mt-8">
+    <div>
+      <Steps current={step.name === "identify" ? 1 : 2} />
+
       {error ? (
         <Notice tone="critical" className="mb-4">
           {error}
@@ -237,7 +239,7 @@ export function SignInForm({
               )
             }
           </Field>
-          <Button type="submit" loading={submitting} block>
+          <Button type="submit" size="lg" loading={submitting} block>
             {submitting ? "Sending…" : "Send me a code"}
           </Button>
 
@@ -262,10 +264,17 @@ export function SignInForm({
         <form onSubmit={verify} className="flex flex-col gap-4">
           {/* The same sentence for an address the shop has never seen: a
               different one would tell a stranger who shops here. */}
-          <Text variant="bodySmall" tone="subdued">
-            We&rsquo;ve sent a code to {step.sentTo}.
-            {step.identifier.email ? " It can take a minute; check your spam folder too." : ""}
-          </Text>
+          <div className="flex gap-3 rounded-md bg-surface-subdued p-3">
+            <Icon
+              name={step.identifier.email ? "mail" : "info"}
+              className="mt-px size-4 text-ink-muted"
+            />
+            <Text variant="bodySmall" tone="subdued" className="min-w-0 break-words">
+              We&rsquo;ve sent a code to{" "}
+              <span className="font-semibold text-ink-strong">{step.sentTo}</span>.
+              {step.identifier.email ? " It can take a minute; check your spam folder too." : ""}
+            </Text>
+          </div>
 
           <Field id="sign-in-code" label="The six-digit code" required>
             {(control) => (
@@ -278,6 +287,9 @@ export function SignInForm({
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
                 required
+                // Spaced out like the digits in the message, so a shopper
+                // copying them across can check each one against its twin.
+                className="py-2.5 text-center font-mono text-h3! tracking-[0.5em] tabular-nums"
               />
             )}
           </Field>
@@ -299,7 +311,7 @@ export function SignInForm({
             )}
           </Field>
 
-          <Button type="submit" loading={submitting} block>
+          <Button type="submit" size="lg" loading={submitting} block>
             {submitting ? "Checking…" : "Sign in"}
           </Button>
 
@@ -336,6 +348,31 @@ export function SignInForm({
       <div className="mt-4">
         <Turnstile onToken={setTurnstileToken} resetSignal={turnstileNonce} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Where the shopper is in the two steps. The bar is decoration; the sentence
+ * under it is what a screen reader gets, and says the same thing.
+ */
+function Steps({ current }: { current: 1 | 2 }) {
+  return (
+    <div className="mb-6">
+      <div className="flex gap-1.5" aria-hidden="true">
+        {[1, 2].map((index) => (
+          <span
+            key={index}
+            className={cx(
+              "h-1 flex-1 rounded-full transition-colors duration-(--duration-normal) ease-standard",
+              index <= current ? "bg-primary" : "bg-line",
+            )}
+          />
+        ))}
+      </div>
+      <Text variant="caption" tone="muted" className="mt-2">
+        Step {current} of 2 · {current === 1 ? "Get a code" : "Enter the code"}
+      </Text>
     </div>
   );
 }
