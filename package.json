@@ -19,9 +19,9 @@
   },
   "dependencies": {
     "@opennextjs/cloudflare": "1.20.6",
-    "next": "16.3.4",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
@@ -32,7 +32,7 @@
     "@vitest/coverage-v8": "^5.0.1",
     "esbuild": "^0.28.1",
     "eslint": "^9",
-    "eslint-config-next": "16.3.4",
+    "eslint-config-next": "16.3.5",
     "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4",
     "typescript": "^5",
