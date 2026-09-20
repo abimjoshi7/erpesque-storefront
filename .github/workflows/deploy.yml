@@ -1,0 +1,85 @@
+name: Deploy
+
+# Ships the storefront Worker (service "erpesque-storefront", bound to
+# shop.ghumtibags.com) to Cloudflare.
+#
+# Gated on CI passing for the exact commit on main, via workflow_run: the
+# verify job already typechecked, linted, tested and built the Worker bundle
+# for this commit, so this workflow only deploys. The private-repo free tier
+# has no branch protection, so this self-gate is what stops a broken direct
+# push to main reaching the live shop.
+#
+# Requires one repository secret: CLOUDFLARE_API_TOKEN, scoped to
+# Workers Scripts:Edit on the account in wrangler.jsonc.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-storefront-main
+  # Never cancel a deploy in flight: a half-uploaded Worker is worse than a
+  # queued one.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: Deploy Cloudflare Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    environment:
+      name: production
+      url: https://shop.ghumtibags.com
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # `npm run deploy` runs the preflight (refuses a build that would inline
+      # a local .env.local or ship without the Turnstile site key), builds the
+      # Worker, and uploads it. .env.local is gitignored, so a CI checkout
+      # never has one.
+      - name: Deploy
+        run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      # The upload succeeding says nothing about whether the shop renders: the
+      # ERP is reached over a service binding, and a missing secret or a broken
+      # binding looks exactly like a good deploy until someone opens the page.
+      - name: Smoke test the live shop
+        run: npm run smoke
+
+      - name: Comment on the commit
+        if: always()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const sha = context.payload.workflow_run?.head_sha ?? context.sha;
+            const ok = '${{ job.status }}' === 'success';
+            const body = ok
+              ? '✅ Storefront deployed and smoke-tested: https://shop.ghumtibags.com/nsbs'
+              : '❌ Storefront deploy failed. If the upload went through, the live '
+                + 'Worker may be the new build — roll back with '
+                + '`npx wrangler rollback --name erpesque-storefront`.';
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: sha,
+              body,
+            });

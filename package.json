@@ -10,6 +10,10 @@
     "deploy": "node scripts/assert-clean-deploy-env.mjs && opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "smoke": "node scripts/smoke.mjs",
     "types:generate": "node scripts/generate-erp-types.mjs",
     "types:check": "npm run types:generate && git diff --exit-code -- src/types/erp-api.d.ts"
   },
@@ -22,14 +26,17 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^22.20.4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^5.0.1",
+    "esbuild": "^0.28.1",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vitest": "^5.0.1",
     "wrangler": "4.131.0"
   }
 }
