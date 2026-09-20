@@ -18,7 +18,11 @@ updates:
         patterns: ["@opennextjs/cloudflare", "wrangler"]
       dev:
         dependency-type: development
-        exclude-patterns: ["wrangler", "eslint-config-next", "@types/react*"]
+        # typescript is excluded until openapi-typescript supports TS 7: it
+        # peers on ^5.x, so a major bump here does not install at all. Raise it
+        # deliberately, with that package, rather than in a weekly group PR.
+        exclude-patterns:
+          ["wrangler", "eslint-config-next", "@types/react*", "typescript"]
     commit-message:
       prefix: build
 

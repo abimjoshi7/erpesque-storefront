@@ -26,7 +26,10 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  # `contents: write` is for the commit comment below — creating one counts as
+  # writing to the repository's contents, and with `read` the step 403s after
+  # a deploy that otherwise went fine.
+  contents: write
   deployments: write
 
 jobs:
