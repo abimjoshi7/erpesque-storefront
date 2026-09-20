@@ -41,9 +41,17 @@ export const STATUS_COPY: Record<
   },
 };
 
-/** Falls back to `pending`, which is what an unknown status most resembles. */
+/**
+ * Falls back to `pending`, which is what an unknown status most resembles.
+ *
+ * `Object.hasOwn` rather than a plain lookup: `STATUS_COPY["toString"]` finds
+ * the prototype's method, and a page would then render a function where the
+ * status belongs.
+ */
 export function statusCopy(status: string | undefined | null) {
-  return (status ? STATUS_COPY[status] : undefined) ?? STATUS_COPY.pending;
+  return status && Object.hasOwn(STATUS_COPY, status)
+    ? STATUS_COPY[status]
+    : STATUS_COPY.pending;
 }
 
 /**
