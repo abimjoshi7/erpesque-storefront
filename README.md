@@ -60,8 +60,64 @@ generate from somewhere else.
 | `npm run build` | Production build |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Unit tests (Vitest) |
+| `npm run test:watch` | Unit tests, watching |
+| `npm run test:coverage` | Unit tests with coverage over `src/lib` |
+| `npm run smoke` | Smoke-test a running shop (defaults to production) |
+| `npm run deploy` | Build the Worker and ship it to Cloudflare |
 | `npm run types:generate` | Regenerate API types from the OpenAPI spec |
 | `npm run types:check` | Fail if the generated types are stale |
+
+`esbuild` is pinned in `devDependencies` although nothing here imports it:
+`@opennextjs/cloudflare` imports it without declaring it and relies on finding a
+hoisted copy, and adding Vitest (whose Vite wants a newer esbuild than
+`@opennextjs/aws` pins) is enough to stop one being hoisted. Without the pin,
+`opennextjs-cloudflare build` fails with `Cannot find package 'esbuild'`.
+
+## Tests
+
+`npm test` covers the pure modules under `src/lib` — the ones that decide money,
+URLs, and whether a request came from this shop. Nothing in the suite starts
+Next or reaches the ERP: the rendering layer's gate is `next build`, and a live
+ERP in CI would be testing the ERP.
+
+`src/lib/next-path.ts` and `src/lib/same-origin.ts` are the two security-relevant
+ones — an open redirect off the sign-in page and the CSRF check on every
+mutation — so a change to either without a test alongside it is a change worth
+questioning.
+
+## CI and deploys
+
+Two workflows, and one repository secret, `CLOUDFLARE_API_TOKEN`
+(Workers Scripts:Edit on the account in `wrangler.jsonc`).
+
+- **`.github/workflows/ci.yml`** runs on every PR and on pushes to main:
+  typecheck, lint, tests, then `opennextjs-cloudflare build` — the *Worker*
+  bundle, not just `next build`, because OpenNext's rewrite has its own ways to
+  fail. It also runs the deploy preflight, so a missing Turnstile site key fails
+  a PR rather than the deploy behind it. A non-blocking `npm audit` job reports
+  advisories without gating unrelated work.
+- **`.github/workflows/deploy.yml`** runs on `workflow_run` after CI succeeds on
+  main, and on `workflow_dispatch`. It builds and uploads the Worker, then runs
+  `npm run smoke` against the live shop. This repo has no branch protection (the
+  private-repo free tier has none), so gating on CI's result for the exact
+  commit is what stops a broken direct push reaching the shop.
+
+The smoke test matters because the upload is not the risky part: every page here
+is rendered from the ERP over a service binding, so a missing secret or a
+binding pointing at nothing looks exactly like a successful deploy until someone
+opens the page. It asserts on content, not status — `error.tsx` renders with a
+200.
+
+Deploys are **not** automatically rolled back; a bad one is one command:
+
+```bash
+npx wrangler rollback --name erpesque-storefront
+```
+
+Dependabot (`.github/dependabot.yml`) opens weekly grouped PRs for npm and
+actions. Next, OpenNext and wrangler move fast, and CI's Worker build is what
+says an upgrade is safe.
 
 ## The cart holds no prices
 

@@ -9,13 +9,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+permissions:
+  contents: read
 
-      - uses: actions/setup-node@v4
+jobs:
+  semantic-pull-request:
+    name: PR title
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
+    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/semantic_pull_request.yml@v1
+
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    # A healthy run is ~5 min; past 20 the runner is stuck, not working.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -24,9 +37,38 @@ jobs:
 
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm test
 
+      # The Worker bundle, not just `next build`. OpenNext rewrites the Next
+      # output into a Worker, and that step has its own ways to fail (a Node
+      # API with no workerd equivalent, a route that will not serialise) which
+      # a plain `next build` passes straight over. This is the same command the
+      # deploy runs, so a green CI means the deploy will at least build.
+      #
       # No ERP environment here on purpose: every tenant route is dynamic, so a
-      # build that needs a live ERP would be a bug. `npm run types:check` is left
-      # out because it regenerates from the ERP's OpenAPI spec, which lives in a
-      # sibling checkout that CI does not have.
-      - run: npm run build
+      # build that needs a live ERP would be a bug. `npm run types:check` is
+      # left out because it regenerates from the ERP's OpenAPI spec, which
+      # lives in a sibling checkout that CI does not have.
+      - name: Build the Worker
+        run: npx opennextjs-cloudflare build
+
+      # The deploy's own preflight, run here so a missing Turnstile key fails a
+      # PR rather than the deploy that follows a merge.
+      - name: Deploy preflight
+        run: node scripts/assert-clean-deploy-env.mjs
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Advisories land on their own schedule, not this repo's, so a new one
+      # should not block an unrelated PR from merging. It reports; it does not
+      # gate. Dependabot (.github/dependabot.yml) opens the PR that fixes it.
+      - run: npm audit --audit-level=high
+        continue-on-error: true

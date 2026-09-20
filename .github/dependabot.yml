@@ -1,0 +1,33 @@
+# Next, OpenNext and wrangler all move quickly, and this repo deploys to a
+# platform whose compatibility date it pins — a Worker runtime left a year
+# behind its SDK is how a deploy starts failing for reasons nobody changed.
+#
+# Weekly, grouped, so the noise is one PR to review rather than twelve. CI runs
+# on each, and a green CI here means the Worker still builds.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      next:
+        patterns: ["next", "eslint-config-next", "react", "react-dom", "@types/react*"]
+      cloudflare:
+        patterns: ["@opennextjs/cloudflare", "wrangler"]
+      dev:
+        dependency-type: development
+        exclude-patterns: ["wrangler", "eslint-config-next", "@types/react*"]
+    commit-message:
+      prefix: build
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
