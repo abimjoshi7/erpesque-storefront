@@ -202,6 +202,37 @@ function erpBinding(): ServiceBinding | undefined {
 }
 
 /**
+ * Fills in the tenant fields an older ERP does not send.
+ *
+ * `requireSignIn` and `signInWith` arrived with signed-in checkout, and the
+ * generated types declare them required because the current spec does. A
+ * deployment running an ERP from before them answers without them, and the
+ * cast in every fetch below is a compile-time promise the runtime then breaks:
+ * `shop.signInWith.includes(...)` on the sign-in page throws, and the shopper
+ * gets "the shop is not answering" from the error boundary — which reads as
+ * the whole shop being down rather than one feature not being deployed.
+ *
+ * The defaults are the safe reading of an ERP that does not know the concept:
+ * no channel can deliver a code, so the sign-in page says the shop cannot send
+ * one, and sign-in is not required, so guest checkout keeps working exactly as
+ * it did before the feature existed.
+ *
+ * Delete this when every ERP the storefront points at sends both fields.
+ */
+export function normalizeTenant(tenant: Tenant): Tenant {
+  return {
+    ...tenant,
+    requireSignIn: tenant.requireSignIn ?? false,
+    signInWith: tenant.signInWith ?? [],
+  };
+}
+
+/** The same, for the `{ tenant, ... }` envelope most endpoints return. */
+function withTenant<T extends { tenant: Tenant }>(body: T): T {
+  return { ...body, tenant: normalizeTenant(body.tenant) };
+}
+
+/**
  * `null` on 404 so callers can decide what a missing thing means, rather than
  * having to catch an exception for an expected outcome.
  */
@@ -242,7 +273,11 @@ export async function fetchCatalog(
   if (query.maxPrice) search.set("maxPrice", String(query.maxPrice));
   if (query.inStock) search.set("inStock", "true");
 
-  return get<Catalog>(`/storefront/${encodeURIComponent(tenantCode)}/catalog`, search);
+  const catalog = await get<Catalog>(
+    `/storefront/${encodeURIComponent(tenantCode)}/catalog`,
+    search,
+  );
+  return catalog && withTenant(catalog);
 }
 
 /**
@@ -263,7 +298,7 @@ export async function fetchFacets(tenantCode: string): Promise<Facets | null> {
   if (!response.ok) throw new ErpError(response.status, path);
 
   const body = (await response.json()) as { data: Facets };
-  return body.data;
+  return withTenant(body.data);
 }
 
 /**
@@ -309,7 +344,7 @@ export async function fetchShopLive(tenantCode: string): Promise<Tenant | null> 
   if (!response.ok) throw new ErpError(response.status, path);
 
   const body = (await response.json()) as { data: Facets };
-  return body.data.tenant;
+  return normalizeTenant(body.data.tenant);
 }
 
 /**
@@ -381,11 +416,12 @@ export async function fetchQuote(
   lines: CartLine[],
   shopperIp?: string,
 ): Promise<Quote | null> {
-  return post<Quote>(
+  const quote = await post<Quote>(
     `/storefront/${encodeURIComponent(tenantCode)}/quote`,
     { lines },
     shopperIp,
   );
+  return quote && withTenant(quote);
 }
 
 /**
@@ -480,16 +516,17 @@ export async function fetchSitemap(
   const body = (await response.json()) as {
     data: { tenant: Tenant; products: SitemapEntry[]; truncated: boolean };
   };
-  return body.data;
+  return withTenant(body.data);
 }
 
 export async function fetchProduct(
   tenantCode: string,
   slug: string,
 ): Promise<{ tenant: Tenant; product: Product } | null> {
-  return get(
+  const body = await get<{ tenant: Tenant; product: Product }>(
     `/storefront/${encodeURIComponent(tenantCode)}/product/${encodeURIComponent(slug)}`,
   );
+  return body && withTenant(body);
 }
 
 /* ------------------------------------------------------------------------- *
