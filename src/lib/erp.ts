@@ -429,10 +429,9 @@ export async function fetchQuote(
  *
  * Goes through `privatePost` because it can carry a session, and so follows
  * that block's rules: never cached, and the session in `X-Shopper-Session`.
- * With a session the ERP stamps the buyer's account on the order, and for a
- * phone sign-in records the number the code was received on whatever
- * `contact.phone` says; an email sign-in has no verified number, so the typed
- * one is kept for delivery. On a shop
+ * With a session the ERP stamps the buyer's account on the order and records
+ * the verified phone — the number the code was received on — whatever
+ * `contact.phone` says. On a shop
  * that requires sign-in, a missing or lapsed session is a 401 thrown from here,
  * which the order route turns into "sign in again".
  */
@@ -561,31 +560,35 @@ export type ShopperSession = components["schemas"]["StorefrontShopperSession"];
 export type OrderSummary = components["schemas"]["StorefrontOrderSummary"];
 
 /**
- * Who a code is for: exactly one of a phone number or an email address, as the
- * shopper typed it. The ERP canonicalises both — ten trailing digits, or the
- * address trimmed and lower-cased — and a code is only ever redeemed against
- * the same one it was sent to.
- *
- * A union rather than two optional fields, so that a call naming both, or
- * neither, does not compile. The ERP refuses both with a 400 anyway; this
- * keeps the mistake from being written in the first place.
+ * Who a code is for: the phone number as the shopper typed it. The ERP
+ * canonicalises it to ten trailing digits, and a code is only ever redeemed
+ * against that same number.
  */
-export type LoginIdentifier = { phone: string; email?: never } | { email: string; phone?: never };
+export type LoginIdentifier = { phone: string };
 
 /** The channels a shop can deliver a sign-in code on right now. */
 export type SignInChannel = Tenant["signInWith"][number];
 
 /**
- * The answer to a code request. Says nothing about whether the phone or address
- * was known: the ERP answers a stranger and a regular identically, so this
+ * The answer to a code request. Says nothing about whether the phone was
+ * known: the ERP answers a stranger and a regular identically, so this
  * endpoint cannot be used to find out who shops here. There is no challenge id
- * — the identifier is what names the challenge, and one has one live code.
+ * — the phone number is what names the challenge, and one number has one live
+ * code.
+ *
+ * `openUrl` is set for WhatsApp and Telegram. The code is not sent until the
+ * shopper opens it and messages the shop from that number.
  */
 export type LoginChallenge = {
   sent: boolean;
   expiresInSeconds: number;
   /** Escalates with each send in the hour: 60, 120, 300, then 900. */
   resendAfterSeconds: number;
+  openUrl?: string | null;
+  /** Set while the ERP is in `WHATSAPP_SANDBOX`. The code is not in this body. */
+  sandbox?: boolean;
+  /** The message the shopper would send. Present only in the sandbox. */
+  sandboxText?: string | null;
 };
 
 /** The only copy of `token`; the ERP keeps a SHA-256 and nothing else. */
@@ -701,12 +704,13 @@ async function privatePost<T>(
 export async function requestLoginCode(
   tenantCode: string,
   identifier: LoginIdentifier,
+  channel: SignInChannel,
   turnstileToken?: string,
   shopperIp?: string,
 ): Promise<LoginChallenge | null> {
   return privatePost<LoginChallenge>(
     `/storefront/${encodeURIComponent(tenantCode)}/auth/request-code`,
-    { ...identifier, turnstileToken },
+    { ...identifier, channel, turnstileToken },
     { shopperIp },
   );
 }
@@ -714,14 +718,52 @@ export async function requestLoginCode(
 /**
  * Exchanges a code for a session.
  *
- * Keyed by the phone number or email address rather than by a challenge id,
+ * Keyed by the phone number rather than by a challenge id,
  * because one identifier has exactly one live code — which is also what makes
  * the send throttle a throttle. `name` is for a form that doubles as a
  * sign-up; omitting it leaves whatever name the shopper's last order recorded.
  */
+/**
+ * Sandbox stand-in for the WhatsApp reply. The ERP answers 404 unless
+ * `WHATSAPP_SANDBOX` is set, so this cannot deliver a code in production.
+ */
+export async function deliverSandboxWhatsApp(
+  from: string,
+  text: string,
+): Promise<{ reply: string } | null> {
+  // This route is a webhook stand-in, so its body is `{ reply }`, not the
+  // `{ data }` envelope the storefront endpoints use.
+  const response = await erpFetch(`${baseUrl()}/webhooks/whatsapp/sandbox`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify({ from, text }),
+    cache: "no-store",
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((body: { error?: string }) => body.error)
+      .catch(() => undefined);
+    throw new ErpError(response.status, "/webhooks/whatsapp/sandbox", detail);
+  }
+  const body = (await response.json()) as { reply?: string };
+  if (!body.reply) return null;
+  return { reply: body.reply };
+}
+
 export async function verifyLoginCode(
   tenantCode: string,
-  payload: LoginIdentifier & { code: string; name?: string },
+  payload: LoginIdentifier & {
+    code: string;
+    name?: string;
+    address?: string;
+    landmark?: string;
+  },
   shopperIp?: string,
 ): Promise<LoginResult | null> {
   return privatePost<LoginResult>(

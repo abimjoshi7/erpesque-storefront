@@ -16,7 +16,7 @@ import { setSession } from "@/lib/session";
  * keeping it to one place means the cookie's attributes are decided once, in
  * `lib/session`.
  *
- * Keyed by the phone number or email address rather than by a challenge id,
+ * Keyed by the phone number rather than by a challenge id,
  * because the ERP keeps exactly one live code per identifier. There is no
  * handle for this form to hold, which is also what makes the send throttle
  * countable. The body must name the same one the code was sent to.
@@ -36,12 +36,16 @@ export async function POST(
   let identifier: LoginIdentifier;
   let code: string;
   let name: string | undefined;
+  let address: string | undefined;
+  let landmark: string | undefined;
   try {
     const body = (await request.json()) as {
       phone?: unknown;
       email?: unknown;
       code?: unknown;
       name?: unknown;
+      address?: unknown;
+      landmark?: unknown;
     };
     const read = readIdentifier(body);
     if ("error" in read) {
@@ -53,6 +57,21 @@ export async function POST(
     identifier = read.identifier;
     code = body.code.trim();
     name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : undefined;
+    address =
+      typeof body.address === "string" && body.address.trim() ? body.address.trim() : undefined;
+    landmark =
+      typeof body.landmark === "string" && body.landmark.trim()
+        ? body.landmark.trim()
+        : undefined;
+    if (!name) {
+      return NextResponse.json({ error: "Enter your name." }, { status: 400 });
+    }
+    if (!address) {
+      return NextResponse.json(
+        { error: "Enter the address the order should be delivered to." },
+        { status: 400 },
+      );
+    }
   } catch {
     return NextResponse.json({ error: "Malformed request." }, { status: 400 });
   }
@@ -60,7 +79,7 @@ export async function POST(
   try {
     const result = await verifyLoginCode(
       tenant,
-      { ...identifier, code, name },
+      { ...identifier, code, name, address, landmark },
       shopperIp(request),
     );
     if (!result) {

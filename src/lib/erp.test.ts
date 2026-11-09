@@ -11,7 +11,7 @@ describe("normalizeTenant", () => {
       name: "nsbs",
       currency: CURRENCY,
       requireSignIn: true,
-      signInWith: ["email" as const],
+      signInWith: ["sms" as const],
     };
     expect(normalizeTenant(tenant)).toEqual(tenant);
   });
@@ -29,7 +29,7 @@ describe("normalizeTenant", () => {
     expect(tenant.requireSignIn).toBe(false);
     expect(tenant.signInWith).toEqual([]);
     // No channel means the sign-in page says so; it must not throw first.
-    expect(() => tenant.signInWith.includes("email")).not.toThrow();
+    expect(() => tenant.signInWith.includes("sms")).not.toThrow();
   });
 
   it("keeps a shop that requires sign-in but has no channel intact", () => {

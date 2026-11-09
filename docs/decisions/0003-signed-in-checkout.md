@@ -1,6 +1,7 @@
 # 0003 — Signed-in checkout: a shop can require verified customers
 
-Status: accepted
+Status: accepted — the email-as-identity section is superseded by
+[`0004`](0004-phone-is-the-identity.md)
 Date: 2026-09-11
 
 ## What this decides

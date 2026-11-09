@@ -119,6 +119,20 @@ export function useCart(tenant: string) {
     [tenant],
   );
 
+  /**
+   * Makes sure the product is in the cart, at quantity 1.
+   *
+   * A second click on a product that is already there focuses it; it does not
+   * add another. Reads storage directly so a click during hydration — when the
+   * hook still reports an empty cart — does not stack a second line on top of
+   * the one already saved.
+   */
+  const include = useCallback((slug: string) => {
+    const current = readSnapshot(tenant);
+    if (current.some((line) => line.slug === slug)) return;
+    write(tenant, [...current, { slug, quantity: 1 }]);
+  }, [tenant]);
+
   const setQuantity = useCallback(
     (slug: string, quantity: number) => {
       const current = readSnapshot(tenant);
@@ -139,5 +153,5 @@ export function useCart(tenant: string) {
 
   const count = lines.reduce((sum, line) => sum + line.quantity, 0);
 
-  return { lines, count, add, setQuantity, remove, clear };
+  return { lines, count, add, include, setQuantity, remove, clear };
 }

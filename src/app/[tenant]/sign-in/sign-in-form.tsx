@@ -10,24 +10,33 @@ import type { LoginIdentifier, SignInChannel } from "@/lib/erp";
 import { safeNext } from "@/lib/next-path";
 
 /**
- * Two steps: an email address or a phone number, then the code sent to it.
+ * Reads the clock through a module function rather than inline: the purity
+ * rule cannot tell an async submit handler from render, and a bare `Date.now`
+ * in the component body reads as an impure call during render.
+ */
+function nowMs(): number {
+  return Date.now();
+}
+
+/**
+ * Two steps: a phone number, then the code.
  *
- * Which of the two is offered is the ERP's answer, not this form's: `channels`
+ * Which buttons are offered is the ERP's answer, not this form's: `channels`
  * is the shop's `signInWith`, the channels the server can deliver a code on
- * right now. Email comes first when both are there, because it is the one that
- * works today; the phone step is kept whole for when an SMS provider lands. The
- * page renders no form at all when the list is empty.
+ * right now. Text sends the code immediately. WhatsApp and Telegram hand back
+ * a link the shopper opens; the code arrives as the reply, after they message
+ * the shop from that same number. The page renders no form at all when the
+ * list is empty.
  *
  * The step is local state rather than a URL segment because a reload has to
- * start over anyway — the code is verified against the identifier, and a URL
- * that looked resumable but was not would be worse than one that plainly is not.
+ * start over anyway — the code is verified against the number, and a URL that
+ * looked resumable but was not would be worse than one that plainly is not.
  *
  * There is no challenge handle to carry: the ERP keeps one live code per phone
- * number or address, so the one the shopper typed is what step two submits
- * alongside the digits. That is also what makes the send throttle countable,
- * since a resend updates the same row rather than creating a rival one.
+ * number, so the one the shopper typed is what step two submits alongside the
+ * digits.
  *
- * Nothing here reveals whether the address is known to the shop. The server
+ * Nothing here reveals whether the number is known to the shop. The server
  * answers a stranger and a regular identically, and this form moves to the code
  * step either way, with the same sentence.
  *
@@ -37,23 +46,35 @@ import { safeNext } from "@/lib/next-path";
  */
 type Step =
   | { name: "identify" }
-  | { name: "code"; identifier: LoginIdentifier; sentTo: string; resendAt: number };
+  | {
+      name: "code";
+      identifier: LoginIdentifier;
+      channel: SignInChannel;
+      sentTo: string;
+      openUrl?: string;
+      sandbox?: boolean;
+      sandboxText?: string;
+      resendAt: number;
+    };
 
 const CHANNEL_COPY: Record<
   SignInChannel,
-  { label: string; hint: string; switchTo: string; different: string }
+  { button: string; open: string; sent: string }
 > = {
-  email: {
-    label: "Email address",
-    hint: "We will email you a six-digit code.",
-    switchTo: "Use my email instead",
-    different: "Use a different email",
+  sms: {
+    button: "Text me a code",
+    open: "Open messages",
+    sent: "We've sent a code by text to",
   },
-  phone: {
-    label: "Phone number",
-    hint: "The number the shop can reach you on. We will text you a code.",
-    switchTo: "Use my phone number instead",
-    different: "Use a different number",
+  whatsapp: {
+    button: "Get code on WhatsApp",
+    open: "Open WhatsApp",
+    sent: "Open WhatsApp and send the message from",
+  },
+  telegram: {
+    button: "Get code on Telegram",
+    open: "Open Telegram",
+    sent: "Open Telegram and share your number from",
   },
 };
 
@@ -69,13 +90,12 @@ export function SignInForm({
 }) {
   const router = useRouter();
   const { refresh } = useShopper();
-  const [channel, setChannel] = useState<SignInChannel>(
-    channels.includes("email") ? "email" : "phone",
-  );
   const [step, setStep] = useState<Step>({ name: "identify" });
   const [value, setValue] = useState("");
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [landmark, setLandmark] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
@@ -85,13 +105,10 @@ export function SignInForm({
   // shopper could see and fix.
   const [turnstileNonce, setTurnstileNonce] = useState(0);
 
-  const other = channels.find((entry) => entry !== channel);
-  const copy = CHANNEL_COPY[channel];
-
   /**
-   * Asking for a code costs the shop a message, so the server throttles it per
-   * identifier and tells us when it will answer again. Counting down to that
-   * moment is kinder than a button that looks live and returns an error.
+   * Asking for a code is throttled per number, and the server tells us when it
+   * will answer again. Counting down to that moment is kinder than a button
+   * that looks live and returns an error.
    */
   const resendAt = step.name === "code" ? step.resendAt : 0;
   const [secondsLeft, setSecondsLeft] = useState(0);
@@ -106,18 +123,13 @@ export function SignInForm({
 
   /**
    * Shared by the first request and by a resend. A resend keeps the shopper on
-   * the code step and reuses the identifier the first code went to: the code
-   * they were sent first stops working, but making them retype the address to
-   * get a second message would be a worse trade.
+   * the code step and reuses the number the first code went to.
    */
-  async function sendCode(resend: boolean) {
+  async function sendCode(channel: SignInChannel, resend: boolean) {
     const identifier: LoginIdentifier =
-      resend && step.name === "code"
-        ? step.identifier
-        : channel === "email"
-          ? { email: value.trim() }
-          : { phone: value.trim() };
-    const sentTo = identifier.email ?? identifier.phone ?? "";
+      resend && step.name === "code" ? step.identifier : { phone: value.trim() };
+    const sentTo = identifier.phone;
+    const chosen = resend && step.name === "code" ? step.channel : channel;
 
     setSubmitting(true);
     setError(null);
@@ -125,10 +137,15 @@ export function SignInForm({
       const response = await fetch(`/api/${tenant}/auth/request-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...identifier, turnstileToken }),
+        body: JSON.stringify({ ...identifier, channel: chosen, turnstileToken }),
       });
       const body = (await response.json()) as {
-        data?: { resendAfterSeconds: number };
+        data?: {
+          resendAfterSeconds: number;
+          openUrl?: string | null;
+          sandbox?: boolean;
+          sandboxText?: string | null;
+        };
         error?: string;
       };
       if (!response.ok || !body.data) {
@@ -138,14 +155,42 @@ export function SignInForm({
       setStep({
         name: "code",
         identifier,
+        channel: chosen,
         sentTo,
-        resendAt: Date.now() + body.data.resendAfterSeconds * 1000,
+        openUrl: body.data.openUrl ?? undefined,
+        sandbox: body.data.sandbox,
+        sandboxText: body.data.sandboxText ?? undefined,
+        resendAt: nowMs() + body.data.resendAfterSeconds * 1000,
       });
       if (resend) setCode("");
     } catch {
       setError("Could not reach the shop. Check your connection.");
     } finally {
       setTurnstileNonce((nonce) => nonce + 1);
+      setSubmitting(false);
+    }
+  }
+
+  async function deliverSandbox(phone: string, text: string) {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/${tenant}/auth/whatsapp-sandbox`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, text }),
+      });
+      const body = (await response.json()) as { data?: { reply?: string }; error?: string };
+      if (!response.ok || !body.data?.reply) {
+        setError(body.error ?? "Sandbox could not deliver the code.");
+        return;
+      }
+      const digits = body.data.reply.replace(/\D/g, "").slice(0, 6);
+      if (digits.length === 6) setCode(digits);
+      else setError(body.data.reply);
+    } catch {
+      setError("Could not reach the shop. Check your connection.");
+    } finally {
       setSubmitting(false);
     }
   }
@@ -162,7 +207,9 @@ export function SignInForm({
         body: JSON.stringify({
           ...step.identifier,
           code,
-          name: name || undefined,
+          name: name.trim(),
+          address: address.trim(),
+          landmark: landmark.trim() || undefined,
         }),
       });
       const body = (await response.json()) as { error?: string };
@@ -197,84 +244,86 @@ export function SignInForm({
 
       {step.name === "identify" ? (
         <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void sendCode(false);
-          }}
+          onSubmit={(event) => event.preventDefault()}
           className="flex flex-col gap-4"
         >
-          {/* Keyed by channel so switching gives a fresh control: a phone
-              number left in an email field would fail the browser's own check
-              before the shopper had typed anything. */}
-          <Field
-            key={channel}
-            id={`sign-in-${channel}`}
-            label={copy.label}
-            hint={copy.hint}
-            required
-          >
-            {(control) =>
-              channel === "email" ? (
-                <Input
-                  {...control}
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  autoFocus
-                  value={value}
-                  onChange={(event) => setValue(event.target.value)}
-                  required
-                />
-              ) : (
-                <Input
-                  {...control}
-                  type="tel"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  autoFocus
-                  value={value}
-                  onChange={(event) => setValue(event.target.value)}
-                  required
-                />
-              )
-            }
+          <Field id="sign-in-phone" label="Phone number" hint="The number this shop can reach you on." required>
+            {(control) => (
+              <Input
+                {...control}
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                autoFocus
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                required
+              />
+            )}
           </Field>
-          <Button type="submit" size="lg" loading={submitting} block>
-            {submitting ? "Sending…" : "Send me a code"}
-          </Button>
-
-          {other ? (
-            <Button
-              type="button"
-              variant="tertiary"
-              size="sm"
-              className="self-start"
-              disabled={submitting}
-              onClick={() => {
-                setChannel(other);
-                setValue("");
-                setError(null);
-              }}
-            >
-              {CHANNEL_COPY[other].switchTo}
-            </Button>
-          ) : null}
+          <div className="flex flex-col gap-2">
+            {channels.map((channel) => (
+              <Button
+                key={channel}
+                type="submit"
+                size="lg"
+                variant={channel === channels[0] ? "primary" : "secondary"}
+                loading={submitting}
+                block
+                onClick={() => void sendCode(channel, false)}
+              >
+                {submitting ? "Sending…" : CHANNEL_COPY[channel].button}
+              </Button>
+            ))}
+          </div>
         </form>
       ) : (
         <form onSubmit={verify} className="flex flex-col gap-4">
-          {/* The same sentence for an address the shop has never seen: a
+          {/* The same sentence for a number the shop has never seen: a
               different one would tell a stranger who shops here. */}
           <div className="flex gap-3 rounded-md bg-surface-subdued p-3">
-            <Icon
-              name={step.identifier.email ? "mail" : "info"}
-              className="mt-px size-4 text-ink-muted"
-            />
+            <Icon name="info" className="mt-px size-4 text-ink-muted" />
             <Text variant="bodySmall" tone="subdued" className="min-w-0 break-words">
-              We&rsquo;ve sent a code to{" "}
-              <span className="font-semibold text-ink-strong">{step.sentTo}</span>.
-              {step.identifier.email ? " It can take a minute; check your spam folder too." : ""}
+              {step.sandbox && !step.openUrl ? (
+                <>
+                  Sandbox is on for{" "}
+                  <span className="font-semibold text-ink-strong">{step.sentTo}</span>. No
+                  WhatsApp test number is configured yet, so deliver the code here and then
+                  sign in.
+                </>
+              ) : (
+                <>
+                  {CHANNEL_COPY[step.channel].sent}{" "}
+                  <span className="font-semibold text-ink-strong">{step.sentTo}</span>
+                  {step.openUrl ? ". The code comes back in that chat. Then enter it here." : "."}
+                </>
+              )}
             </Text>
           </div>
+
+          {step.openUrl ? (
+            <a
+              href={step.openUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-11 items-center justify-center rounded-md bg-[image:var(--primary-sheen)] px-4 text-body font-semibold text-on-primary shadow-sm"
+            >
+              {CHANNEL_COPY[step.channel].open}
+            </a>
+          ) : null}
+
+          {step.sandbox && step.sandboxText ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="lg"
+              block
+              disabled={submitting}
+              onClick={() => void deliverSandbox(step.sentTo, step.sandboxText ?? "")}
+            >
+              Sandbox: deliver the code to this number
+            </Button>
+          ) : null}
 
           <Field id="sign-in-code" label="The six-digit code" required>
             {(control) => (
@@ -294,19 +343,43 @@ export function SignInForm({
             )}
           </Field>
 
-          {/* Only useful the first time; the shop already knows a returning
-              buyer's name, and sending an empty one leaves it as it was. */}
-          <Field
-            id="sign-in-name"
-            label="Your name"
-            hint="Only needed if this is your first time."
-          >
+          <Field id="sign-in-name" label="Your name" required>
             {(control) => (
               <Input
                 {...control}
                 autoComplete="name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
+                required
+              />
+            )}
+          </Field>
+          <Field
+            id="sign-in-address"
+            label="Delivery address"
+            hint="Where the rider brings the order. Checkout will use this."
+            required
+          >
+            {(control) => (
+              <Input
+                {...control}
+                autoComplete="street-address"
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                required
+              />
+            )}
+          </Field>
+          <Field
+            id="sign-in-landmark"
+            label="Landmark"
+            hint="A shop or crossing the rider will know."
+          >
+            {(control) => (
+              <Input
+                {...control}
+                value={landmark}
+                onChange={(event) => setLandmark(event.target.value)}
               />
             )}
           </Field>
@@ -321,7 +394,7 @@ export function SignInForm({
               variant="tertiary"
               size="sm"
               disabled={submitting || secondsLeft > 0}
-              onClick={() => void sendCode(true)}
+              onClick={() => void sendCode(step.channel, true)}
             >
               {secondsLeft > 0 ? `Send again in ${secondsLeft}s` : "Send another code"}
             </Button>
@@ -336,7 +409,7 @@ export function SignInForm({
                 setError(null);
               }}
             >
-              {CHANNEL_COPY[step.identifier.email ? "email" : "phone"].different}
+              Use a different number
             </Button>
           </div>
         </form>

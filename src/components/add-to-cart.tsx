@@ -7,7 +7,7 @@ import { useState } from "react";
 import { useShopper } from "@/components/shopper-provider";
 import { Button, ButtonLink, Icon, Notice, QuantityStepper, Text } from "@/design-system";
 import { useCart } from "@/lib/cart";
-import { signInHref } from "@/lib/next-path";
+import { checkoutHref, signInHref } from "@/lib/next-path";
 
 /**
  * Adds a product to the cart.
@@ -153,7 +153,7 @@ export function AddToCart({
               Added {added} to your cart
             </span>
             <Link
-              href={`/${tenant}/cart`}
+              href={checkoutHref(tenant)}
               className="font-semibold text-ink-strong underline underline-offset-4"
             >
               View cart

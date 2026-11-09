@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { shopShortcuts } from "@/components/shop-shortcuts";
+import { checkoutHref } from "@/lib/next-path";
 import { ShopWordmark } from "@/components/shop-wordmark";
 import { Container, Icon, Text, type IconName } from "@/design-system";
 
@@ -56,7 +57,7 @@ export function SiteFooter({
         <FooterColumn heading="Your account" className="lg:col-span-2">
           <FooterLink href={`${home}/account`}>Orders &amp; account</FooterLink>
           <FooterLink href={`${home}/sign-in`}>Sign in</FooterLink>
-          <FooterLink href={`${home}/cart`}>Cart</FooterLink>
+          <FooterLink href={checkoutHref(tenant)}>Cart</FooterLink>
         </FooterColumn>
 
         <div className="col-span-2 lg:col-span-4">

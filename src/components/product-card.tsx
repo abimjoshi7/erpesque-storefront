@@ -23,31 +23,42 @@ import { formatPrice } from "@/lib/money";
  * photographs are shot on white, and a dark box around a white photograph
  * reads as a sticker rather than a product.
  *
- * The whole card is one link and holds nothing else interactive: a button
+ * The whole card is one control and holds nothing else interactive: a button
  * nested in a link is invalid, and a shopper tapping a card on a phone should
- * never have to aim for which half of it they meant.
+ * never have to aim for which half of it they meant. On the sale desk that
+ * control selects the product; everywhere else it opens the product page.
  */
 export function ProductCard({
   tenant,
   product,
   currency,
   headingAs = "h2",
+  onSelect,
+  selected = false,
 }: {
   tenant: string;
   product: Product;
   currency: NonNullable<Tenant["currency"]>;
   /** `h3` when the grid sits under a section heading rather than the page's h1. */
   headingAs?: "h2" | "h3";
+  /**
+   * When set, choosing the card selects it on this page instead of opening
+   * the product. The product page stays reachable from the cart.
+   */
+  onSelect?: () => void;
+  selected?: boolean;
 }) {
   const image = primaryImage(tenant, product.images);
   const outOfStock = product.availability === "out_of_stock";
   const unpriced = product.priceMinor === null || product.priceMinor === undefined;
 
-  return (
-    <Link
-      href={`/${tenant}/product/${product.slug}`}
-      className="group flex h-full flex-col rounded-lg outline-offset-4"
-    >
+  const className = cx(
+    "group flex h-full w-full flex-col rounded-lg text-left outline-offset-4",
+    selected && "rounded-lg ring-2 ring-ink-strong ring-offset-2 ring-offset-bg",
+  );
+
+  const body = (
+    <>
       <div
         className={cx(
           "relative flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-line",
@@ -119,6 +130,20 @@ export function ProductCard({
           )}
         </div>
       </div>
+    </>
+  );
+
+  if (onSelect) {
+    return (
+      <button type="button" onClick={onSelect} aria-pressed={selected} className={className}>
+        {body}
+      </button>
+    );
+  }
+
+  return (
+    <Link href={`/${tenant}/product/${product.slug}`} className={className}>
+      {body}
     </Link>
   );
 }

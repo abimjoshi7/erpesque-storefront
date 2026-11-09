@@ -45,9 +45,7 @@ export function AccountLink({ tenant }: { tenant: string }) {
     <Link href={`/${tenant}/account`} className={headerActionClasses}>
       <Icon name="user" />
       <span className="sr-only sm:not-sr-only sm:max-w-40 sm:truncate">
-        {/* Whichever identity the shopper proved — a phone, or for an email
-            sign-in the address — when the shop has no name for them yet. */}
-        {session.shopper.name ?? session.shopper.phone ?? session.shopper.email ?? "Your orders"}
+        {session.shopper.name ?? session.shopper.phone ?? "Your orders"}
       </span>
     </Link>
   ) : (

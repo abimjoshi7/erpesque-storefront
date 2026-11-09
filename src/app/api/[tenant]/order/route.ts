@@ -25,9 +25,8 @@ const SIGN_IN_AGAIN = "Your session ended — sign in again to place your order.
  *
  * The shopper's session, when there is one, is forwarded as `X-Shopper-Session`
  * and never looked at here. The ERP decides what it means: it bills the order
- * to the buyer's account, and where the shopper signed in by phone it records
- * that verified number in place of whatever was typed (an email sign-in keeps
- * the typed number, as one for the rider to ring). On a shop that requires
+ * to the buyer's account, and it records the verified phone in place of
+ * whatever was typed. On a shop that requires
  * sign-in, the ERP refuses an order without a live session with a 401, and
  * that 401 is the only place the rule is decided.
  *

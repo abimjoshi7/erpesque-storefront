@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { safeNext, signInHref } from "@/lib/next-path";
+import { checkoutHref, safeNext, signInHref } from "@/lib/next-path";
 
 const TENANT = "nsbs";
 const FALLBACK = "/nsbs/account";
@@ -40,6 +40,12 @@ describe("safeNext", () => {
   it("refuses the sign-in page itself, which would loop", () => {
     expect(safeNext(TENANT, "/nsbs/sign-in")).toBe(FALLBACK);
     expect(safeNext(TENANT, "/nsbs/sign-in/verify")).toBe(FALLBACK);
+  });
+});
+
+describe("checkoutHref", () => {
+  it("opens the shop with the payment rail", () => {
+    expect(checkoutHref(TENANT)).toBe("/nsbs?checkout=1");
   });
 });
 

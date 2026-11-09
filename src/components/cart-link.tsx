@@ -5,6 +5,7 @@ import Link from "next/link";
 import { headerActionClasses } from "@/components/account-link";
 import { Icon } from "@/design-system";
 import { useCart } from "@/lib/cart";
+import { checkoutHref } from "@/lib/next-path";
 
 /**
  * Cart link with a count.
@@ -21,7 +22,7 @@ export function CartLink({ tenant }: { tenant: string }) {
   const { count } = useCart(tenant);
 
   return (
-    <Link href={`/${tenant}/cart`} className={headerActionClasses}>
+    <Link href={checkoutHref(tenant)} className={headerActionClasses}>
       {/* The badge sits off the bag's top-right corner, clear of the handle, and
           the margin keeps it off the "Cart" label. The margin is there with or
           without a count, so the label does not shift when the count arrives

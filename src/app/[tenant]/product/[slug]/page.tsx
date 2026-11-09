@@ -208,7 +208,7 @@ function Reassurance({ requireSignIn }: { requireSignIn: boolean }) {
     points.push({
       icon: "user",
       title: "Sign in with a code",
-      body: "We send a one-time code to your phone or email. No password.",
+      body: "We send a one-time code to your phone. No password.",
     });
   }
 

@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 
 import { ButtonLink, Card, Container, Icon, Notice, Text } from "@/design-system";
 import { fetchShopLive, fetchShopperSession, isUnauthorized } from "@/lib/erp";
-import { safeNext } from "@/lib/next-path";
+import { checkoutHref, safeNext } from "@/lib/next-path";
 import { readSession } from "@/lib/session";
 
 import { SignInForm } from "./sign-in-form";
@@ -30,8 +30,9 @@ export const metadata: Metadata = {
  * anyone holding a cookie back to the cart, a lapsed cookie would bounce
  * between the two forever.
  *
- * How a code is sent is the shop's `signInWith` — email today, SMS when a
- * provider lands. When it is empty the server cannot deliver a code at all, and
+ * How a code is sent is the shop's `signInWith` — text, WhatsApp or Telegram,
+ * whichever this server can deliver on. When it is empty the server cannot
+ * deliver a code at all, and
  * the page says so plainly rather than offering a form whose first step is
  * certain to fail. On a shop that also requires sign-in, that is a shop that
  * cannot take orders, and the copy is written for the merchant as much as for
@@ -70,24 +71,21 @@ export default async function SignInPage({
   // would swallow the navigation.
   if (signedIn) redirect(next);
 
-  const checkingOut = next === `/${tenant}/cart`;
+  const checkingOut = next === `/${tenant}/cart` || next === checkoutHref(tenant);
   const channels = shop.signInWith;
-  const byEmail = channels.includes("email");
 
   return (
     <Container as="main" className="py-10 sm:py-16">
       <div className="mx-auto w-full max-w-md">
         <div className="flex flex-col items-center text-center">
           <span className="flex size-12 items-center justify-center rounded-full bg-accent-soft text-ink-strong">
-            <Icon name={byEmail ? "mail" : "user"} className="size-6" />
+            <Icon name="user" className="size-6" />
           </span>
           <Text as="h1" variant="displayMedium" className="mt-4">
             Sign in
           </Text>
           <Text variant="bodyLarge" tone="subdued" className="mt-2 text-balance">
-            {byEmail
-              ? "We will email you a code. There is no password to remember."
-              : "We will send a code to your phone. There is no password to remember."}
+            We will send a code to your phone. There is no password to remember.
           </Text>
         </div>
 
@@ -97,7 +95,7 @@ export default async function SignInPage({
               <Notice tone="info" className="mb-6">
                 {checkingOut
                   ? "Sign in to place your order. Your cart is kept exactly as you left it."
-                  : `${shop.name} takes orders from signed-in customers, so every order is tied to an address that has received a code.`}
+                  : `${shop.name} takes orders from signed-in customers, so every order is tied to a phone number that has received a code.`}
               </Notice>
             ) : null}
 
@@ -113,11 +111,7 @@ export default async function SignInPage({
           </div>
         </Card>
 
-        {/* Only true of a phone sign-in: a guest order records a phone number
-            that was typed, never an email, so signing in by email adopts
-            nothing — matching it by phone would hand a guest's history to
-            anyone who had typed their number. */}
-        {channels.includes("phone") ? (
+        {channels.length > 0 ? (
           <Text variant="caption" tone="muted" className="mt-6 text-center">
             Ordered before as a guest? Sign in with the same phone number and your
             past orders will be here.

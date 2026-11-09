@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 
 import { authErrorResponse } from "@/lib/cart-request";
 import { shopperIp } from "@/lib/client-ip";
-import { requestLoginCode, type LoginIdentifier } from "@/lib/erp";
+import { requestLoginCode, type LoginIdentifier, type SignInChannel } from "@/lib/erp";
 import { readIdentifier } from "@/lib/login-identifier";
 import { forbiddenResponse, isSameOrigin } from "@/lib/same-origin";
 
 /**
- * Asks the shop to send a one-time code to a phone number or an email address —
- * exactly one, relayed as typed.
+ * Asks the shop to send a one-time code to a phone number, on the channel the
+ * shopper chose. The number is relayed as typed.
  *
  * The reply says nothing about whether that number or address has shopped here
  * before. Same body, same status, either way — a different answer for a known
@@ -19,9 +19,8 @@ import { forbiddenResponse, isSameOrigin } from "@/lib/same-origin";
  * The ERP's refusals are relayed as they are written: an identifier that looks
  * wrong, a code sent moments ago, an hourly cap used up, or a channel the shop
  * cannot deliver on (a 503 — SMS, today). Each names something the shopper or
- * the merchant can act on, and the throttle is keyed on the identifier rather
- * than the caller's address because the identifier is what a message is sent
- * to, and what a bill is run up against.
+ * the merchant can act on, and the throttle is keyed on the phone number rather
+ * than the caller's address because the number is what a message is sent to.
  */
 export async function POST(
   request: Request,
@@ -32,18 +31,25 @@ export async function POST(
   const { tenant } = await params;
 
   let identifier: LoginIdentifier;
+  let channel: SignInChannel;
   let turnstileToken: string | undefined;
   try {
     const body = (await request.json()) as {
       phone?: unknown;
       email?: unknown;
+      channel?: unknown;
       turnstileToken?: unknown;
     };
     const read = readIdentifier(body);
     if ("error" in read) {
       return NextResponse.json({ error: read.error }, { status: 400 });
     }
+    const chosen = readChannel(body.channel);
+    if ("error" in chosen) {
+      return NextResponse.json({ error: chosen.error }, { status: 400 });
+    }
     identifier = read.identifier;
+    channel = chosen.channel;
     turnstileToken =
       typeof body.turnstileToken === "string" ? body.turnstileToken : undefined;
   } catch {
@@ -54,6 +60,7 @@ export async function POST(
     const challenge = await requestLoginCode(
       tenant,
       identifier,
+      channel,
       turnstileToken,
       shopperIp(request),
     );
@@ -64,4 +71,15 @@ export async function POST(
   } catch (error) {
     return authErrorResponse(error);
   }
+}
+
+const CHANNELS = ["sms", "whatsapp", "telegram"] as const;
+
+function readChannel(
+  value: unknown,
+): { channel: SignInChannel } | { error: string } {
+  if (typeof value !== "string" || !CHANNELS.includes(value as SignInChannel)) {
+    return { error: "Choose text, WhatsApp or Telegram." };
+  }
+  return { channel: value as SignInChannel };
 }

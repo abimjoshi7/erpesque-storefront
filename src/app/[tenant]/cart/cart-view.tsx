@@ -2,18 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { useShopper } from "@/components/shopper-provider";
 import { Turnstile } from "@/components/turnstile";
 
-import { AvailabilityBadge } from "@/components/availability-badge";
-import { ImagePlaceholder } from "@/components/image-placeholder";
 import {
   Button,
   ButtonLink,
-  Card,
-  EmptyState,
   Field,
   Icon,
   Input,
@@ -22,37 +18,59 @@ import {
   Spinner,
   Text,
   cx,
-  type IconName,
 } from "@/design-system";
 import { useCart } from "@/lib/cart";
-import type { CartLine, PlacedOrder, Quote } from "@/lib/erp";
-import { mediaHref } from "@/lib/media";
+import type { CartLine, PlacedOrder, Quote, Tenant } from "@/lib/erp";
 import { formatPrice } from "@/lib/money";
 
 /**
  * What checkout knows about a signed-in shopper, and nothing more. Built by the
  * cart page from the ERP's session, so every field is the ERP's.
  *
- * `phone` and `email` are *verified* identities — the one the sign-in code was
- * received on — and never something merely typed. A shopper who signed in by
- * email has no verified phone, so `phone` is null and checkout asks for one.
+ * `phone` is the verified number — the one the sign-in code was received on —
+ * and never something merely typed. A guest has no shopper here, so checkout
+ * asks them to type one.
  */
 export type CheckoutShopper = {
   name: string | null;
   phone: string | null;
-  email: string | null;
-  /** From the shopper's most recent order — a suggestion, never a saved address. */
+  /** Saved at sign-in, or taken from the latest order when sign-in has not saved one. */
   address: string | null;
   landmark: string | null;
 };
 
+/**
+ * The product the sale desk is showing beside the grid.
+ *
+ * A snapshot, not a live catalog row: the shopper can filter the grid away
+ * from the product they chose, and the rail still has to name it.
+ */
+export type RailProduct = {
+  slug: string;
+  title: string;
+  category?: string | null;
+  priceMinor?: number | null;
+  availability?: "in_stock" | "low_stock" | "out_of_stock" | null;
+  image: string | null;
+};
+
 type Props = {
   tenant: string;
-  shopName: string;
   /** Null for a guest, on a shop that still takes guest orders. */
   shopper: CheckoutShopper | null;
+  /**
+   * False while the session answer is still in flight. The delivery form uses
+   * `defaultValue`, which only applies on mount, so it waits rather than
+   * opening empty and then throwing the shopper's name away.
+   */
+  shopperReady: boolean;
   /** Where to send a shopper whose session the ERP has just refused. */
   signInHref: string;
+  /** Courtesy gate. The order route and the ERP still decide. */
+  requireSignIn: boolean;
+  /** Catalog currency, so the selected card can price itself before a quote. */
+  currency: NonNullable<Tenant["currency"]> | null;
+  selection: RailProduct | null;
 };
 
 /**
@@ -87,17 +105,33 @@ async function priceCart(
 }
 
 /**
- * Cart and checkout.
+ * The order ticket beside the product grid.
  *
- * Every figure on this screen comes from the server. The cart holds slugs and
- * quantities; changing anything re-quotes, so a price that moved since the
- * shopper added the item is reflected before they commit, and the total shown
- * is computed by the same code that will price the order.
+ * It is a counter slip, not a checkout page. Lines, quantities and the total
+ * stay on the ticket with the customer's name and phone. Confirming the ticket
+ * opens the delivery step in a dialog, the way a payment step opens after the
+ * basket is set.
+ *
+ * Every figure comes from the server. The cart holds slugs and quantities;
+ * changing anything re-quotes, so a price that moved since the item was added
+ * is reflected before they commit.
  */
-export function CartView({ tenant, shopName, shopper, signInHref }: Props) {
+export function CartView({
+  tenant,
+  shopper,
+  shopperReady,
+  signInHref,
+  requireSignIn,
+  currency: catalogCurrency,
+  selection,
+}: Props) {
   const { lines, setQuantity, remove, clear } = useCart(tenant);
 
   const [placed, setPlaced] = useState<PlacedOrder | null>(null);
+  // The address step. The ticket stays the screen until they say the items are
+  // the order; an emptied cart drops back to the ticket on its own.
+  const [delivering, setDelivering] = useState(false);
+  const deliveryRef = useRef<HTMLDialogElement>(null);
 
   // The quote is stamped with the cart it was priced for. Without that stamp a
   // stale quote from the previous cart keeps rendering while the new one is in
@@ -143,139 +177,305 @@ export function CartView({ tenant, shopName, shopper, signInHref }: Props) {
   const quoteError = current?.error ?? null;
   // Derived rather than stored: the cart has lines but no answer for them yet.
   const pricing = lines.length > 0 && current === null;
+  const takingDelivery = delivering && lines.length > 0;
+
+  useEffect(() => {
+    const dialog = deliveryRef.current;
+    if (!dialog) return;
+    if (takingDelivery && !dialog.open) dialog.showModal();
+    if (!takingDelivery && dialog.open) dialog.close();
+  }, [takingDelivery]);
 
   if (placed) {
     return <OrderPlaced tenant={tenant} order={placed} signedIn={shopper !== null} />;
   }
 
-  if (lines.length === 0) {
-    return (
-      <EmptyState
-        className="mt-8"
-        icon={<Icon name="bag" className="size-12" />}
-        title="Your cart is empty"
-        description={`Nothing here yet. Anything you add from ${shopName} is kept in this browser until you order.`}
-        action={<ButtonLink href={`/${tenant}`}>Continue shopping</ButtonLink>}
-      />
-    );
-  }
-
-  const currency = quote?.tenant.currency;
+  const currency = quote?.tenant.currency ?? catalogCurrency ?? undefined;
+  const stockBlocked = selection?.availability === "out_of_stock";
+  const priceBlocked =
+    selection != null && (selection.priceMinor === null || selection.priceMinor === undefined);
+  const signInBlocked = requireSignIn && shopperReady && shopper === null;
+  const heldBack =
+    selection != null && !lines.some((line) => line.slug === selection.slug)
+      ? stockBlocked
+        ? "Out of stock."
+        : priceBlocked
+          ? "No price yet."
+          : null
+      : null;
 
   const blockedSlug = quoteError ? slugNamedIn(quoteError, lines) : null;
   const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
 
   return (
-    <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start lg:gap-10 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <div className="flex min-w-0 flex-col gap-6">
-        <Card
-          padding={false}
-          header={
-            <div className="flex items-baseline justify-between gap-4">
-              <Text as="h2" variant="headlineMedium">
-                Items
-              </Text>
-              <Text variant="bodySmall" tone="muted" className="tabular-nums">
-                {itemCount} {itemCount === 1 ? "item" : "items"}
-              </Text>
-            </div>
-          }
-        >
-          <ul className="divide-y divide-line">
+    <div className="flex flex-col gap-5">
+      <div>
+        <Text as="h2" variant="titleLarge">
+          Order
+        </Text>
+        {lines.length === 0 ? (
+          <Text variant="bodySmall" tone="subdued" className="mt-2">
+            No items
+          </Text>
+        ) : (
+          <ul className="mt-3 divide-y divide-line border-y border-line">
             {lines.map((line) => (
-              <CartRow
+              <TicketLine
                 key={line.slug}
-                tenant={tenant}
                 line={line}
                 // Matched by slug rather than index: a failed quote returns no
                 // lines at all, and positions would silently mispair titles.
                 priced={quote?.lines.find((entry) => entry.slug === line.slug)}
                 currency={currency}
+                selected={selection?.slug === line.slug}
+                titleFallback={selection?.slug === line.slug ? selection.title : undefined}
                 onQuantity={(quantity) => setQuantity(line.slug, quantity)}
                 onRemove={() => remove(line.slug)}
               />
             ))}
           </ul>
-          <div className="border-t border-line px-2 py-2 sm:px-3">
-            <ButtonLink href={`/${tenant}`} variant="tertiary" size="sm">
-              <Icon name="arrow-left" className="size-4" />
-              Continue shopping
-            </ButtonLink>
-          </div>
-        </Card>
-
-        {quoteError ? (
-          <Notice tone="critical">
-            <div className="flex gap-3">
-              <Icon name="alert" className="mt-px size-4" />
-              <div>
-                <p>{quoteError}</p>
-                {/* The ERP refuses the whole cart over one bad line, and until
-                    that line goes the shopper cannot be quoted at all — so a
-                    message with nothing to press is a dead end. The button only
-                    appears when the refusal names something actually in this
-                    cart. */}
-                {blockedSlug ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => remove(blockedSlug)}
-                  >
-                    Remove it and carry on
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </Notice>
+        )}
+        {heldBack && selection ? (
+          <Text variant="bodySmall" tone="subdued" className="mt-2">
+            {selection.title}. {heldBack}
+          </Text>
         ) : null}
-
-        <CheckoutForm shopper={shopper} onSubmit={checkout.submit} />
       </div>
 
-      {/* Sticky only where there is height to spare. On a phone the summary
-          sits after the lines and the form, which is the order a shopper reads
-          them in — and puts the button that places the order last. */}
-      <aside className="w-full lg:sticky lg:top-24">
-        <Summary quote={quote} currency={currency} pricing={pricing} itemCount={itemCount}>
-          <Turnstile onToken={checkout.setTurnstileToken} resetSignal={checkout.turnstileNonce} />
+      {quoteError ? (
+        <Notice tone="critical">
+          <div className="flex gap-3">
+            <Icon name="alert" className="mt-px size-4" />
+            <div>
+              <p>{quoteError}</p>
+              {/* The ERP refuses the whole cart over one bad line, and until
+                  that line goes the ticket cannot be priced — so a message
+                  with nothing to press is a dead end. The button only appears
+                  when the refusal names something actually on this ticket. */}
+              {blockedSlug ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => remove(blockedSlug)}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </Notice>
+      ) : null}
 
-          {checkout.error ? <Notice tone="critical">{checkout.error}</Notice> : null}
+      {signInBlocked ? <SignInToOrder href={signInHref} /> : null}
+      {lines.length > 0 && !signInBlocked && !shopperReady ? (
+        <Text variant="bodySmall" tone="muted">
+          Checking the customer…
+        </Text>
+      ) : null}
 
-          <Button
-            type="submit"
-            form={CHECKOUT_FORM}
-            size="lg"
-            block
-            disabled={pricing || !quote || !checkout.tokenReady}
-            loading={checkout.submitting}
-          >
-            {checkout.submitting ? "Placing order…" : "Place order"}
+      {lines.length > 0 && !signInBlocked && shopperReady ? (
+        <form
+          id={CHECKOUT_FORM}
+          onSubmit={(event) => {
+            if (!takingDelivery) {
+              event.preventDefault();
+              if (customerReady(event.currentTarget)) setDelivering(true);
+              return;
+            }
+            checkout.submit(event);
+          }}
+          className="flex flex-col gap-4"
+        >
+          <div className="flex flex-col gap-3">
+            <Text as="h2" variant="titleLarge">
+              Customer
+            </Text>
+            <CheckoutField
+              name="name"
+              label="Name"
+              required
+              autoComplete="name"
+              defaultValue={shopper?.name ?? undefined}
+            />
+            {shopper?.phone ? (
+              <CheckoutField
+                name="phone"
+                label="Phone"
+                required
+                type="tel"
+                value={shopper.phone}
+                readOnly
+              />
+            ) : (
+              <CheckoutField
+                name="phone"
+                label="Phone"
+                required
+                type="tel"
+                autoComplete="tel"
+              />
+            )}
+          </div>
+
+          <Total quote={quote} currency={currency} pricing={pricing} />
+
+          <Button type="submit" size="lg" block disabled={pricing || !quote}>
+            Deliver
           </Button>
 
-          <ul className="flex flex-col gap-2.5 text-body-sm text-ink-subdued">
-            <Assurance icon="cash">Payment is on delivery.</Assurance>
-            <Assurance icon="shield">
-              Prices are checked against the shop&rsquo;s live catalog as your order is
-              placed.
-            </Assurance>
-          </ul>
-        </Summary>
-      </aside>
+          <dialog
+            ref={deliveryRef}
+            aria-labelledby="delivery-title"
+            onClose={() => setDelivering(false)}
+            className={cx(
+              "m-auto w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-line bg-surface p-5 text-ink shadow-lg",
+              "backdrop:bg-ink-strong/60",
+            )}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <Text id="delivery-title" as="h2" variant="titleLarge">
+                  Deliver
+                </Text>
+                <Text variant="bodySmall" tone="subdued" className="mt-1 tabular-nums">
+                  {itemCount} {itemCount === 1 ? "item" : "items"}
+                </Text>
+              </div>
+              <Button
+                variant="tertiary"
+                size="sm"
+                iconOnly
+                aria-label="Close"
+                disabled={checkout.submitting}
+                icon={<Icon name="x" className="size-4" />}
+                onClick={() => setDelivering(false)}
+              />
+            </div>
+            <div className="mt-4">
+              <CheckoutField
+                name="address"
+                label="Address"
+                required={takingDelivery}
+                autoComplete="street-address"
+                defaultValue={shopper?.address ?? undefined}
+              />
+            </div>
+            <div className="mt-4">
+              <Total quote={quote} currency={currency} pricing={pricing} />
+            </div>
+            <div className="mt-4 flex flex-col gap-3">
+              <Turnstile
+                onToken={checkout.setTurnstileToken}
+                resetSignal={checkout.turnstileNonce}
+              />
+              {checkout.error ? <Notice tone="critical">{checkout.error}</Notice> : null}
+              <Button
+                type="submit"
+                size="lg"
+                block
+                disabled={pricing || !quote || !checkout.tokenReady}
+                loading={checkout.submitting}
+              >
+                {checkout.submitting ? "Sending…" : "Send order"}
+              </Button>
+            </div>
+          </dialog>
+        </form>
+      ) : lines.length > 0 ? (
+        <Total quote={quote} currency={currency} pricing={pricing} />
+      ) : null}
     </div>
   );
 }
 
+function customerReady(form: HTMLFormElement): boolean {
+  const name = form.elements.namedItem("name");
+  const phone = form.elements.namedItem("phone");
+  if (name instanceof HTMLInputElement && !name.checkValidity()) {
+    name.reportValidity();
+    return false;
+  }
+  if (phone instanceof HTMLInputElement && !phone.checkValidity()) {
+    phone.reportValidity();
+    return false;
+  }
+  return true;
+}
+
+function SignInToOrder({ href }: { href: string }) {
+  return (
+    <ButtonLink href={href} block>
+      <Icon name="user" />
+      Sign in
+    </ButtonLink>
+  );
+}
+
 /**
- * The delivery form's state and its submit.
+ * One line on the ticket.
  *
- * A hook rather than a component because its two halves render in different
- * places: the fields sit with the cart lines, and the button, the challenge and
- * any refusal sit in the order summary beside the total being committed to.
+ * `priced` is absent until the first quote lands and while a failed one is on
+ * screen, so the row still names the item without a figure.
+ */
+function TicketLine({
+  line,
+  priced,
+  currency,
+  selected,
+  titleFallback,
+  onQuantity,
+  onRemove,
+}: {
+  line: CartLine;
+  priced: Quote["lines"][number] | undefined;
+  currency: Quote["tenant"]["currency"] | undefined;
+  selected: boolean;
+  titleFallback: string | undefined;
+  onQuantity: (quantity: number) => void;
+  onRemove: () => void;
+}) {
+  const title = priced?.title ?? titleFallback ?? line.slug;
+
+  return (
+    <li className={cx("flex flex-col gap-2 py-3", selected && "bg-surface-subdued -mx-2 px-2")}>
+      <div className="flex items-baseline justify-between gap-3">
+        <Text as="p" variant="bodyMedium" tone="strong" className="min-w-0">
+          {title}
+        </Text>
+        {priced && currency ? (
+          <Text variant="bodyMedium" tone="strong" className="shrink-0 tabular-nums">
+            {formatPrice(priced.lineTotalMinor, currency)}
+          </Text>
+        ) : null}
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <QuantityStepper
+          size="sm"
+          value={line.quantity}
+          onChange={onQuantity}
+          label={`Quantity of ${title}`}
+        />
+        <Button
+          variant="tertiary"
+          size="sm"
+          icon={<Icon name="trash" className="size-4" />}
+          onClick={onRemove}
+          aria-label={`Remove ${title}`}
+        >
+          Remove
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * Sends the ticket.
  *
- * A 401 means the ERP no longer accepts the session. The shopper is sent to
- * sign in and brought back here; the cart is in localStorage and is not
- * touched, so nothing they chose is lost on the way.
+ * A 401 means the ERP no longer accepts the session. The customer is sent to
+ * sign in and brought back here; the ticket is in localStorage and is not
+ * touched.
  */
 function useCheckout({
   tenant,
@@ -315,12 +515,11 @@ function useCheckout({
         body: JSON.stringify({
           lines,
           contact: {
-            name: form.get("name"),
-            phone: shopper?.phone ?? form.get("phone"),
-            address: form.get("address"),
-            landmark: form.get("landmark"),
+            name: shopper?.name || field(form, "name"),
+            phone: shopper?.phone || field(form, "phone"),
+            address: shopper?.address || field(form, "address"),
+            landmark: shopper?.landmark || undefined,
           },
-          note: form.get("note"),
           turnstileToken,
         }),
       });
@@ -357,393 +556,79 @@ function useCheckout({
   };
 }
 
-/**
- * One line of the basket.
- *
- * `priced` is absent until the first quote lands and while a failed one is on
- * screen, so every figure here is optional and the row still renders without
- * them — a cart that blanks out because the server is slow looks broken.
- */
-function CartRow({
-  tenant,
-  line,
-  priced,
-  currency,
-  onQuantity,
-  onRemove,
-}: {
-  tenant: string;
-  line: CartLine;
-  priced: Quote["lines"][number] | undefined;
-  currency: Quote["tenant"]["currency"] | undefined;
-  onQuantity: (quantity: number) => void;
-  onRemove: () => void;
-}) {
-  const title = priced?.title ?? line.slug;
-  const image = priced?.image ? mediaHref(tenant, priced.image) : null;
-
-  return (
-    <li className="flex gap-4 p-4 sm:gap-5 sm:p-5">
-      <Link
-        href={`/${tenant}/product/${line.slug}`}
-        // Decorative here: the title beside it is the same link, and a screen
-        // reader announcing the product twice per row makes a cart tedious.
-        tabIndex={-1}
-        aria-hidden="true"
-        className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-line bg-media p-1.5 sm:size-24"
-      >
-        {image ? (
-          // eslint-disable-next-line @next/next/no-img-element -- see the note on ProductCard.
-          <img src={image} alt="" loading="lazy" className="size-full object-contain" />
-        ) : (
-          <ImagePlaceholder className="scale-75" />
-        )}
-      </Link>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <Link
-              href={`/${tenant}/product/${line.slug}`}
-              className="line-clamp-2 text-title font-semibold text-ink-strong hover:underline hover:underline-offset-4"
-            >
-              {title}
-            </Link>
-
-            {priced && currency ? (
-              <Text variant="bodySmall" tone="subdued" className="mt-0.5 tabular-nums">
-                {formatPrice(priced.unitPriceMinor, currency)} each
-              </Text>
-            ) : null}
-          </div>
-
-          {priced && currency ? (
-            <Text variant="titleLarge" tone="strong" className="shrink-0 text-right tabular-nums">
-              {formatPrice(priced.lineTotalMinor, currency)}
-            </Text>
-          ) : null}
-        </div>
-
-        {/* Multi-buy savings are shown, not silently applied. A total lower
-            than price × quantity looks like a mistake unless the shopper is
-            told why it is lower. */}
-        {priced?.discountMinor && currency ? (
-          <Text variant="bodySmall" tone="success" className="mt-1 tabular-nums">
-            Multi-buy saving {formatPrice(priced.discountMinor, currency)}
-          </Text>
-        ) : null}
-
-        {priced?.availability ? (
-          <div className="mt-2">
-            <AvailabilityBadge availability={priced.availability} />
-          </div>
-        ) : null}
-
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <QuantityStepper
-            size="sm"
-            value={line.quantity}
-            onChange={onQuantity}
-            label={`Quantity of ${title}`}
-          />
-          <Button
-            variant="tertiary"
-            size="sm"
-            icon={<Icon name="trash" className="size-4" />}
-            onClick={onRemove}
-            // Names the product: a column of identical "Remove" buttons is a
-            // guessing game for anyone moving through them by keyboard.
-            aria-label={`Remove ${title}`}
-          >
-            Remove
-          </Button>
-        </div>
-      </div>
-    </li>
-  );
+function field(form: FormData, name: string): string {
+  const value = form.get(name);
+  return typeof value === "string" ? value : "";
 }
 
 /**
- * What the basket comes to, with the controls that commit to it underneath.
+ * The figure the ticket commits to.
  *
- * Every figure is the server's. While a re-quote is in flight the last good
- * total stays on screen dimmed rather than disappearing — a total that blinks
- * out on each quantity tap reads as a page losing track of the order.
+ * While a re-quote is in flight the last good total stays, dimmed, rather than
+ * disappearing — a total that blinks out on each quantity tap reads as the
+ * counter losing the order.
  */
-function Summary({
+function Total({
   quote,
   currency,
   pricing,
-  itemCount,
-  children,
 }: {
   quote: Quote | null;
   currency: Quote["tenant"]["currency"] | undefined;
   pricing: boolean;
-  itemCount: number;
-  children: ReactNode;
 }) {
-  return (
-    <Card
-      padding={false}
-      header={
-        <Text as="h2" variant="headlineMedium">
-          Order summary
+  if (!quote || !currency) {
+    return (
+      <div className="flex items-center gap-2 text-ink-muted">
+        {pricing ? <Spinner className="size-3.5" label="" /> : null}
+        <Text variant="bodySmall" tone="inherit">
+          {pricing ? "Pricing…" : "Total pending"}
         </Text>
-      }
-    >
-      <div
-        className={cx(
-          "p-4 transition-opacity sm:p-5",
-          pricing && quote ? "opacity-60" : undefined,
-        )}
-      >
-        {!quote || !currency ? (
-          <div className="flex items-center gap-2 text-ink-muted">
-            {pricing ? <Spinner className="size-3.5" label="" /> : null}
-            <Text variant="bodySmall" tone="inherit">
-              {pricing ? "Pricing your cart…" : "Your total will appear here."}
-            </Text>
-          </div>
-        ) : (
-          <>
-            <dl className="space-y-2.5 text-body-sm">
-              <div className="flex justify-between gap-4">
-                <dt className="text-ink-subdued">
-                  Items <span className="tabular-nums">({itemCount})</span>
-                </dt>
-                <dd className="tabular-nums">{formatPrice(itemsTotal(quote), currency)}</dd>
-              </div>
-
-              {quote.delivery ? (
-                <div className="flex justify-between gap-4">
-                  <dt className="text-ink-subdued">{quote.delivery.title}</dt>
-                  <dd className="tabular-nums">
-                    {quote.delivery.waived ? (
-                      <span className="font-semibold text-success">Free</span>
-                    ) : (
-                      formatPrice(quote.delivery.amountMinor, currency)
-                    )}
-                  </dd>
-                </div>
-              ) : null}
-
-              <div className="flex items-baseline justify-between gap-4 border-t border-line pt-3 text-ink-strong">
-                <dt className="text-title font-semibold">Total</dt>
-                <dd className="text-h3 font-bold tabular-nums">
-                  {formatPrice(quote.totalMinor, currency)}
-                </dd>
-              </div>
-            </dl>
-
-            {/* Not a row of its own: the ERP folds tax into every figure above,
-                so a "Tax" line here would read as something still to be added. */}
-            {quote.taxMinor > 0 ? (
-              <Text variant="caption" tone="muted" className="mt-2 tabular-nums">
-                Includes {formatPrice(quote.taxMinor, currency)} tax.
-              </Text>
-            ) : null}
-
-            {quote.delivery && !quote.delivery.waived && quote.delivery.freeOverMinor ? (
-              <Text variant="caption" tone="muted" className="mt-1 tabular-nums">
-                Delivery is free over {formatPrice(quote.delivery.freeOverMinor, currency)}.
-              </Text>
-            ) : null}
-          </>
-        )}
       </div>
+    );
+  }
 
-      <div className="flex flex-col gap-4 border-t border-line p-4 sm:p-5">{children}</div>
-    </Card>
-  );
-}
-
-function Assurance({ icon, children }: { icon: IconName; children: ReactNode }) {
   return (
-    <li className="flex gap-2.5">
-      <Icon name={icon} className="mt-px size-4 text-ink-muted" />
-      <span>{children}</span>
-    </li>
-  );
-}
-
-/**
- * The delivery form.
- *
- * For a signed-in shopper the fields start from the account: the name the shop
- * has for them and the address and landmark from their last order, all of it
- * editable, because a parcel can go somewhere new.
- *
- * A verified phone is not editable. It is the number the sign-in code was
- * received on, and the ERP records that number for a signed-in order whatever
- * the form sends — so offering a box to type another one into would be offering
- * a choice that is not honoured. It is still sent, so a guest body and a
- * signed-in body stay one shape. A shopper who signed in by email has no
- * verified phone, and the rider still needs one to call, so for them the phone
- * is an ordinary required field and their verified address is shown instead,
- * read-only, as the identity the order is placed under.
- */
-function CheckoutForm({
-  shopper,
-  onSubmit,
-}: {
-  shopper: CheckoutShopper | null;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  return (
-    <form id={CHECKOUT_FORM} onSubmit={onSubmit} className="flex flex-col gap-6">
-      <CheckoutSection
-        icon="user"
-        title="Contact"
-        description="Who the shop calls to confirm before delivering."
-      >
-        <CheckoutField
-          name="name"
-          label="Your name"
-          required
-          autoComplete="name"
-          defaultValue={shopper?.name ?? undefined}
-        />
-        {shopper?.phone ? (
-          <CheckoutField
-            name="phone"
-            label="Phone"
-            type="tel"
-            value={shopper.phone}
-            readOnly
-            hint="Verified with the code we sent. Sign out to order with another number."
-          />
-        ) : (
-          <CheckoutField
-            name="phone"
-            label="Phone"
-            required
-            type="tel"
-            autoComplete="tel"
-            hint={shopper ? "For the rider to call when they arrive." : undefined}
-          />
-        )}
-        {shopper?.email ? (
-          <CheckoutField
-            name="email"
-            label="Email"
-            type="email"
-            value={shopper.email}
-            readOnly
-            hint="Verified with the code we sent. This order is placed under it."
-            wide
-          />
-        ) : null}
-      </CheckoutSection>
-
-      <CheckoutSection
-        icon="truck"
-        title="Delivery"
-        description="Where the rider brings your order."
-      >
-        <CheckoutField
-          name="address"
-          label="Delivery address"
-          required
-          autoComplete="street-address"
-          defaultValue={shopper?.address ?? undefined}
-          wide
-        />
-        <CheckoutField
-          name="landmark"
-          label="Landmark"
-          hint="A shop or crossing the rider will know."
-          defaultValue={shopper?.landmark ?? undefined}
-          wide
-        />
-        <CheckoutField name="note" label="Anything the shop should know" wide />
-      </CheckoutSection>
-    </form>
-  );
-}
-
-function CheckoutSection({
-  icon,
-  title,
-  description,
-  children,
-}: {
-  icon: IconName;
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <Card
-      padding={false}
-      header={
-        <div className="flex items-center gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-subdued text-ink-subdued">
-            <Icon name={icon} className="size-4.5" />
-          </span>
-          <div>
-            <Text as="h2" variant="headlineMedium">
-              {title}
-            </Text>
-            <Text variant="caption" tone="muted">
-              {description}
-            </Text>
-          </div>
+    <dl className={cx("space-y-1.5", pricing && quote ? "opacity-60" : undefined)}>
+      {quote.delivery ? (
+        <div className="flex justify-between gap-4 text-body-sm">
+          <dt className="text-ink-subdued">{quote.delivery.title}</dt>
+          <dd className="tabular-nums">
+            {quote.delivery.waived ? "Free" : formatPrice(quote.delivery.amountMinor, currency)}
+          </dd>
         </div>
-      }
-    >
-      <div className="grid gap-5 p-4 sm:grid-cols-2 sm:p-5">{children}</div>
-    </Card>
+      ) : null}
+      <div className="flex items-baseline justify-between gap-4 text-ink-strong">
+        <dt className="text-title font-semibold">Total</dt>
+        <dd className="text-h3 font-bold tabular-nums">
+          {formatPrice(quote.totalMinor, currency)}
+        </dd>
+      </div>
+    </dl>
   );
 }
 
-/**
- * One checkout input.
- *
- * A thin wrapper over the design system's [Field] rather than a use of it
- * directly, because every control here shares the same id-from-name convention
- * and the same "optional unless marked" rule, and repeating both five times is
- * how two of them end up disagreeing.
- *
- * Validation is the browser's `required` and the ERP's own reply. Nothing is
- * re-checked in between: a second opinion here would either duplicate the
- * server's rules or contradict them, and it is the server that decides whether
- * an order is accepted.
- */
 function CheckoutField({
   name,
   label,
   required,
   type = "text",
   autoComplete,
-  hint,
   defaultValue,
   value,
   readOnly,
-  wide,
 }: {
   name: string;
   label: string;
   required?: boolean;
   type?: string;
   autoComplete?: string;
-  hint?: string;
-  /** A starting point the shopper can change — the account's details. */
   defaultValue?: string;
-  /** Fixed, with `readOnly`: shown and submitted, but not the shopper's to edit. */
   value?: string;
   readOnly?: boolean;
-  /** Spans both columns on a wide screen — an address does not fit half a row. */
-  wide?: boolean;
 }) {
   return (
-    <Field
-      id={`checkout-${name}`}
-      label={label}
-      required={required}
-      hint={hint}
-      className={wide ? "sm:col-span-2" : undefined}
-    >
+    <Field id={`checkout-${name}`} label={label} required={required}>
       {(control) => (
         <Input
           {...control}
@@ -754,8 +639,6 @@ function CheckoutField({
           defaultValue={defaultValue}
           value={value}
           readOnly={readOnly}
-          // A variant rather than a plain override: `bg-surface` in the base
-          // classes would otherwise win or lose on stylesheet order alone.
           className="min-h-11 read-only:bg-surface-subdued read-only:text-ink-subdued"
         />
       )}
@@ -773,80 +656,41 @@ function OrderPlaced({
   signedIn: boolean;
 }) {
   return (
-    <section className="mx-auto mt-8 max-w-2xl">
-      <Card padding={false} elevation="md">
-        <div className="flex flex-col items-center gap-3 px-6 pt-10 pb-8 text-center sm:px-10">
-          <span className="flex size-14 items-center justify-center rounded-full bg-success-soft text-success">
-            <Icon name="check" className="size-7" />
-          </span>
-          <Text as="h2" variant="displayMedium" className="mt-2 text-balance">
-            Order {order.orderNumber} received
+    <section className="flex flex-col gap-4">
+      <div>
+        <Text as="h2" variant="titleLarge">
+          Order {order.orderNumber}
+        </Text>
+        <Text variant="bodySmall" tone="subdued" className="mt-1">
+          Pay on delivery.
+        </Text>
+        {order.currency ? (
+          <Text variant="displayMedium" as="p" className="mt-3 tabular-nums">
+            {formatPrice(order.totalMinor, order.currency)}
           </Text>
-          <Text variant="bodyLarge" tone="subdued" className="max-w-md">
-            The shop will call you to confirm before delivering. Payment is on delivery.
-          </Text>
-          {order.currency ? (
-            <div className="mt-3 rounded-md bg-surface-subdued px-5 py-3">
-              <Text variant="caption" tone="muted">
-                Total
-              </Text>
-              <Text variant="displayMedium" as="p" className="tabular-nums">
-                {formatPrice(order.totalMinor, order.currency)}
-              </Text>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex flex-col gap-5 border-t border-line p-6 sm:px-10">
-          {/*
-            The status link is shown once, here, and never emailed or stored: this
-            is the only copy the shopper will get, because the shop keeps a hash of
-            the token rather than the token. Worth saying so plainly — otherwise
-            someone closes the tab and has no way back to their own order.
-          */}
-          <Notice tone="info">
-            <div className="flex gap-3">
-              <Icon name="info" className="mt-px size-4" />
-              <div>
-                <p>
-                  <Link
-                    href={`/${tenant}/order/${order.statusToken}`}
-                    className="font-semibold underline underline-offset-4"
-                  >
-                    Track or cancel this order
-                  </Link>
-                </p>
-                {/* A signed-in order is in the account's history as well, so the
-                    link is no longer the only way back — but it is still the only
-                    way to cancel, which the account pages cannot do yet. */}
-                <p className="mt-1">
-                  {signedIn ? (
-                    <>
-                      It is also in{" "}
-                      <Link
-                        href={`/${tenant}/account`}
-                        className="underline underline-offset-4"
-                      >
-                        your orders
-                      </Link>
-                      . Keep this link if you may want to cancel — cancelling happens
-                      there.
-                    </>
-                  ) : (
-                    "Save this link — it is the only way back to your order, and it is not sent anywhere else."
-                  )}
-                </p>
-              </div>
-            </div>
-          </Notice>
-
-          <div className="flex justify-center">
-            <ButtonLink href={`/${tenant}`} variant="secondary">
-              Keep shopping
-            </ButtonLink>
-          </div>
-        </div>
-      </Card>
+        ) : null}
+      </div>
+      <Link
+        href={`/${tenant}/order/${order.statusToken}`}
+        className="text-body-sm font-semibold text-ink-strong underline underline-offset-4"
+      >
+        Track or cancel
+      </Link>
+      {signedIn ? (
+        <Link
+          href={`/${tenant}/account`}
+          className="text-body-sm text-ink-subdued underline underline-offset-4"
+        >
+          Orders
+        </Link>
+      ) : (
+        <Text variant="caption" tone="muted">
+          Keep the track link. It is the only way back to this order.
+        </Text>
+      )}
+      <ButtonLink href={`/${tenant}`} variant="secondary">
+        New order
+      </ButtonLink>
     </section>
   );
 }
@@ -863,21 +707,4 @@ function OrderPlaced({
  */
 function slugNamedIn(message: string, lines: CartLine[]): string | null {
   return lines.find((line) => message.includes(line.slug))?.slug ?? null;
-}
-
-/**
- * What the goods come to, delivery excluded.
- *
- * Not `quote.subtotalMinor`: the ERP prices delivery as a line like any other
- * and folds it into both the subtotal and the tax. Rendering that figure above
- * a separate delivery row showed the charge twice, in a column where items plus
- * delivery did not add up to the total.
- *
- * Subtracting one server-authoritative integer from another is not a second
- * implementation of the pricing rules — both are gross figures, so no tax or
- * rounding decision is being remade here. The result is exactly the sum of the
- * line totals listed above it.
- */
-function itemsTotal(quote: Quote): number {
-  return quote.totalMinor - (quote.delivery?.amountMinor ?? 0);
 }

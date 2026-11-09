@@ -65,3 +65,13 @@ export function safeNext(tenant: string, value: unknown): string {
 export function signInHref(tenant: string, path: string): string {
   return `/${tenant}/sign-in?next=${encodeURIComponent(path)}`;
 }
+
+/**
+ * The shop listing with the payment rail open.
+ *
+ * The cart route redirects here, and the header's cart control points here, so
+ * checkout is the same screen as the products.
+ */
+export function checkoutHref(tenant: string): string {
+  return `/${encodeURIComponent(tenant)}?checkout=1`;
+}

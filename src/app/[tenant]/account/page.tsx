@@ -63,11 +63,7 @@ export default async function AccountPage({
 
   if (!history) redirect(`/${tenant}/sign-in`);
 
-  // The identity the shopper proved. An email sign-in has no verified phone,
-  // and saying which address this account is means a shopper with two — one by
-  // phone, one by email, which are separate accounts for now — can tell which
-  // history they are looking at.
-  const signedInAs = shopper?.shopper.phone ?? shopper?.shopper.email;
+  const signedInAs = shopper?.shopper.phone;
   const name = shopper?.shopper.name;
 
   return (

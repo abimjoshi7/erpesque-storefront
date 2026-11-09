@@ -10422,24 +10422,10 @@ export interface paths {
         put?: never;
         /**
          * Place a web order
-         * @description Whether a session is required is the shop's choice, published as
-         *     `StorefrontTenant.requireSignIn`. Where it is true, an order with no
-         *     session, or with one that has expired or been revoked, is refused with
-         *     401 before anything is priced or written. Where it is false, the session
-         *     is optional: presenting one stamps `storefront_account_id` on the order,
-         *     and a guest or a stale session places a guest order exactly as before.
-         *
-         *     A signed-in order is attributed to the session's own shopper, never to
-         *     whoever the typed phone number belongs to. Where the session has a
-         *     verified phone (the shopper signed in by phone), the order is placed on
-         *     that number: `contact.phone` is still required by the schema so the
-         *     guest and signed-in bodies stay one shape, but it is ignored and the
-         *     verified number recorded instead - a number typed into a form proves
-         *     nothing, and one a code was received on does. Where the session was
-         *     verified by email, `contact.phone` is recorded as typed, as a number to
-         *     ring for delivery, and is not used to find or merge any shopper record.
-         *     Name, address and landmark are taken from the request as given, so a
-         *     buyer can send a parcel somewhere new.
+         * @description The shopper's session is optional. Presenting one stamps
+         *     `storefront_account_id` on the order; a guest, or a session that has
+         *     expired, places a guest order exactly as before - a missing or stale
+         *     session is never a reason a checkout fails.
          *
          *     Prices the cart exactly as `/quote` does, then writes an
          *     ordinary `sales_orders` row with `source = 'web'`,
@@ -10523,19 +10509,6 @@ export interface paths {
                 };
                 400: components["responses"]["BadRequest"];
                 /**
-                 * @description The shop requires sign-in (`requireSignIn`) and no live session was
-                 *     presented. Checked after the tenant resolves, so an unknown shop is
-                 *     still the same 404 as ever.
-                 */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /**
                  * @description Turnstile could not confirm a person submitted the order. A
                  *     Cloudflare outage does *not* produce this - a check that cannot be
                  *     made lets the order through, leaving the rate buckets as the
@@ -10551,19 +10524,6 @@ export interface paths {
                 };
                 404: components["responses"]["NotFound"];
                 429: components["responses"]["TooManyRequests"];
-                /**
-                 * @description The server is configured to require Turnstile and has no secret key
-                 *     to check a token with. A misconfiguration, not a Cloudflare outage:
-                 *     it fails closed, where an unreachable Cloudflare fails open.
-                 */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
             };
         };
         delete?: never;
@@ -10708,26 +10668,26 @@ export interface paths {
         put?: never;
         /**
          * Send a shopper a one-time sign-in code
-         * @description Unauthenticated. The body names exactly one of `phone` or `email`; the
-         *     code goes to that address, by SMS or by email. Both, or neither, is 400.
-         *     Which channels this deployment can deliver on right now is published as
-         *     `StorefrontTenant.signInWith`, and asking for one that is not listed
-         *     answers 503 rather than reporting a send that never happened.
+         * @description Unauthenticated. Writes or updates the single live challenge for this
+         *     phone number. `channel` chooses how the code arrives: `sms` sends it
+         *     now, `whatsapp` and `telegram` return `openUrl` and send the code only
+         *     after the shopper messages the shop from that same number. Email is
+         *     refused.
          *
-         *     Writes or updates the single live challenge for that identifier. The
-         *     response is identical whether or not the shop has ever seen the number
-         *     or address. It has to be - a differing reply would make this a way to
-         *     ask "does this person shop here", which is the customer list the module
+         *     The response is identical whether or not the shop has ever seen the
+         *     number. It has to be - a differing reply would make this a way to ask
+         *     "does this person shop here", which is the customer list the module
          *     spends its effort not leaking.
          *
-         *     Throttled on the identifier - the canonical phone, or the address
-         *     trimmed and lower-cased - not on the caller's address: every shopper
-         *     reaches this API through the storefront's server, so the only IP the
-         *     edge sees is that server's, and the identifier is what a message is
-         *     sent to. One live challenge exists per identifier and a resend updates
-         *     it in place, so the send counters survive the resend - a counter a new
-         *     row would reset is not a counter. Turnstile, the send cap and the
-         *     attempt cap apply to email exactly as to phone. Implemented in
+         *     Throttled on the canonical phone, not on the caller's address: every
+         *     shopper reaches this API through the storefront's server, so the only
+         *     IP the edge sees is that server's, and the phone number is what costs
+         *     money to send to. One live challenge exists per number and a resend
+         *     updates it in place, so the send counters survive the resend - a
+         *     counter a new row would reset is not a counter.
+         *
+         *     Returns 503 when the shop has no SMS provider configured, rather than
+         *     reporting a send that never happened. Implemented in
          *     `routes/storefront_auth.rs::request_code`.
          */
         post: {
@@ -10747,19 +10707,18 @@ export interface paths {
                          *     digits, so "+977 9841112233" and "9841112233" are one
                          *     person and hold one challenge between them.
                          */
-                        phone?: string;
+                        phone: string;
                         /**
-                         * @description As the shopper typed it. Identity is the address trimmed
-                         *     and lower-cased, so "Ram@Example.com " and
-                         *     "ram@example.com" hold one challenge between them.
+                         * @description How the code should arrive. Omitted means `sms`. `email`
+                         *     is rejected: the phone number is the only identity.
+                         * @enum {string}
                          */
-                        email?: string;
+                        channel?: "sms" | "whatsapp" | "telegram";
                         /**
                          * @description Cloudflare Turnstile token from the sign-in form. Checked
                          *     only where `TURNSTILE_SECRET_KEY` is set, and after the
-                         *     number or address has been validated - the token is
-                         *     single-use, so challenging first would make a retry fail
-                         *     on a replay.
+                         *     phone number has been validated - the token is single-use,
+                         *     so challenging first would make a retry fail on a replay.
                          */
                         turnstileToken?: string | null;
                     };
@@ -10767,8 +10726,8 @@ export interface paths {
             };
             responses: {
                 /**
-                 * @description A code was sent. Says nothing about whether the number or address
-                 *     is known to the shop.
+                 * @description A code was sent. Says nothing about whether the number is known to
+                 *     the shop.
                  */
                 200: {
                     headers: {
@@ -10777,13 +10736,25 @@ export interface paths {
                     content: {
                         "application/json": components["schemas"]["DataEnvelope"] & {
                             data?: {
+                                /**
+                                 * @description True when the code was handed to the SMS gateway.
+                                 *     False for WhatsApp and Telegram, where `openUrl`
+                                 *     is the next step and the code is sent only after
+                                 *     the shopper messages the shop.
+                                 */
                                 sent: boolean;
+                                /**
+                                 * @description Present for `whatsapp` and `telegram`. The shopper
+                                 *     opens it and sends the prefilled message from the
+                                 *     number they typed.
+                                 */
+                                openUrl?: string | null;
                                 /** @description How long the code stays valid. */
                                 expiresInSeconds: number;
                                 /**
                                  * @description Seconds until another code may be requested for
-                                 *     this number or address. Escalates with each send in
-                                 *     the hour: 60, 120, 300, then 900.
+                                 *     this number. Escalates with each send in the hour:
+                                 *     60, 120, 300, then 900.
                                  */
                                 resendAfterSeconds: number;
                             };
@@ -10791,9 +10762,8 @@ export interface paths {
                     };
                 };
                 /**
-                 * @description Both or neither of `phone` and `email` were given, the one given
-                 *     looks wrong, a code was sent too recently, or the hourly cap for it
-                 *     is used up. The message names which.
+                 * @description The number looks wrong, or a code was sent too recently, or the
+                 *     hourly cap for this number is used up. The message names which.
                  */
                 400: {
                     headers: {
@@ -10815,10 +10785,8 @@ export interface paths {
                 404: components["responses"]["NotFound"];
                 429: components["responses"]["TooManyRequests"];
                 /**
-                 * @description The channel asked for is not configured on this server (no SMS
-                 *     provider for `phone`, no email sender for `email`), the provider
-                 *     would not take the message, or the server requires Turnstile and
-                 *     has no secret to check it with. Nothing was sent.
+                 * @description The shop has no SMS provider configured, or the provider would not
+                 *     take the message. Nothing was sent.
                  */
                 503: {
                     headers: {
@@ -10857,16 +10825,11 @@ export interface paths {
          *     code; the count is committed even on a failed attempt, or every guess
          *     would be free.
          *
-         *     The body names the same one of `phone` or `email` the code was sent to.
-         *
-         *     Signing in by phone adopts the shopper's earlier guest orders into
-         *     their account, so a year of checking out as a guest does not present as
-         *     an empty history. The proof runs the right way round: a guest order
+         *     Signing in adopts the shopper's earlier guest orders into their
+         *     account, so a year of checking out as a guest does not present as an
+         *     empty history. The proof runs the right way round: a guest order
          *     records a phone number that was merely typed, a session records one a
-         *     code was received on. Signing in by email adopts nothing - a guest
-         *     order carries no email to match, and matching it by a phone number the
-         *     email session never proved would hand anyone who typed a victim's
-         *     number that victim's history.
+         *     code was received on.
          *
          *     `token` in the response is the only copy - the database keeps a
          *     SHA-256. The storefront's server holds it and presents it as
@@ -10886,8 +10849,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        phone?: string;
-                        email?: string;
+                        phone: string;
                         /**
                          * @description Six digits. Punctuation and spaces are stripped, so a code
                          *     pasted with its surrounding text still works.
@@ -10948,20 +10910,6 @@ export interface paths {
                 };
                 404: components["responses"]["NotFound"];
                 429: components["responses"]["TooManyRequests"];
-                /**
-                 * @description The channel named is one this server cannot send codes on (no SMS
-                 *     provider for `phone`, no email sender for `email`) - the same
-                 *     answer `request-code` gives, rather than the 401 a wrong code gets,
-                 *     which would send the shopper to ask for a code that cannot be sent.
-                 */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
             };
         };
         delete?: never;
@@ -11315,15 +11263,6 @@ export interface paths {
                          * @description Null means delivery is never free.
                          */
                         freeDeliveryOver?: number | null;
-                        /**
-                         * @description Whether only signed-in shoppers may fill a cart and check
-                         *     out. Unlike every other field here, omitting it leaves the
-                         *     saved value alone rather than resetting it: a settings page
-                         *     written before the flag existed must not reopen guest
-                         *     checkout by saving a delivery fee. Off until a shop turns
-                         *     it on: signed-in checkout is opt-in per shop.
-                         */
-                        requireSignIn?: boolean;
                     };
                 };
             };
@@ -11417,19 +11356,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Whether the shop has enough configured to go live
-         * @description Authenticated, `storefront.read`. Backs the setup wizard's final step
-         *     and is also enforced server-side: `PUT /preferences` refuses to add
-         *     `storefront` to `enabledModules` for a tenant that is not yet ready.
-         *
-         *     Pricelist and location are not requirements - `PUT
-         *     /storefront-admin/settings` treats "none" as a real choice, not an
-         *     incomplete one. The one thing an empty shop cannot do without is a
-         *     product to sell - and, when it requires sign-in, a way to sign in: a
-         *     shop with `requireSignIn` on, on a server that can send codes neither
-         *     by email nor by SMS, cannot take a single order and is reported as not
-         *     ready. Reported only; a shop already live in that state stays live.
-         *     Implemented in `routes/storefront_admin.rs::get_readiness`.
+         * Whether the shop can go live, and which sign-in channels work
+         * @description Authenticated, `storefront.read`. `ready` is false until at least one
+         *     product is published. `signInWith` is the phone-verification status of
+         *     this server: the channels that can deliver a code right now. An empty
+         *     list does not by itself mark the shop unready, because guest checkout
+         *     does not need a code. Implemented in
+         *     `routes/storefront_admin.rs::get_readiness`.
          */
         get: {
             parameters: {
@@ -11451,6 +11384,7 @@ export interface paths {
                                 ready?: boolean;
                                 /** @description Empty when ready. */
                                 reasons?: string[];
+                                signInWith?: ("sms" | "whatsapp" | "telegram")[];
                             };
                         };
                     };
@@ -11544,21 +11478,9 @@ export interface paths {
          *     Built for catching a catalogue up to the shop after the fact, where
          *     most items have never had a merchant write a description or pick a
          *     photo for them - unlike `PUT /storefront-admin/item`, this never
-         *     touches copy or sort weight and never replaces a gallery. A slug is
+         *     touches copy, gallery or sort weight, only `isPublished`. A slug is
          *     still generated for each item published for the first time, since a
-         *     product cannot go live without a URL. A published item whose gallery
-         *     is empty gets its catalogue photo (`items.image_path`) imported in the
-         *     background, after the response - `importingPhotos` counts them.
-         *
-         *     Send exactly one of `itemIds` (products picked one by one) or
-         *     `selection` (every product matching the publishing list's search and
-         *     filter - what "select all" means once the list is longer than one
-         *     page). A selection is resolved on the server inside the write's own
-         *     transaction, through the same WHERE clause as
-         *     `GET /storefront-admin/items`, so it covers every page, not only the
-         *     ones the client has loaded. Either way at most 5000 products per
-         *     request; a larger selection is rejected with a 400 asking the
-         *     merchant to narrow it.
+         *     product cannot go live without a URL.
          *
          *     Unpublishing an item that was never published is a no-op for that
          *     item rather than an error. All `itemIds` must belong to the tenant and
@@ -11577,31 +11499,14 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /**
-                         * @description `items.item_id` values; at most 5000 per request.
-                         *     Duplicates are ignored. Mutually exclusive with
-                         *     `selection`.
-                         */
-                        itemIds?: number[];
-                        /**
-                         * @description Every product `GET /storefront-admin/items` would list
-                         *     under `q` and `published`, minus `excludeIds`. Mutually
-                         *     exclusive with `itemIds`.
-                         */
-                        selection?: {
-                            /** @description Same free-text search as the list's `q`. */
-                            q?: string;
-                            /** @description Same tri-state filter as the list's `published`; absent for both. */
-                            published?: boolean;
-                            /** @description Rows unticked after selecting all. */
-                            excludeIds?: number[];
-                        };
+                        /** @description `items.item_id` values; at most 500 per request. */
+                        itemIds: number[];
                         isPublished: boolean;
                     };
                 };
             };
             responses: {
-                /** @description How many products the request covered, and how many actually changed. */
+                /** @description How many records were actually changed. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -11609,19 +11514,7 @@ export interface paths {
                     content: {
                         "application/json": components["schemas"]["DataEnvelope"] & {
                             data?: {
-                                /** @description Products the request covered. */
-                                matched?: number;
-                                /**
-                                 * @description Products whose state actually changed; the rest
-                                 *     of `matched` were already published (or already
-                                 *     out of the shop).
-                                 */
                                 updated?: number;
-                                /**
-                                 * @description Empty galleries now being filled from catalogue
-                                 *     photos in the background.
-                                 */
-                                importingPhotos?: number;
                             };
                         };
                     };
@@ -13502,10 +13395,354 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/business-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the seller identity printed on documents
+         * @description One row per tenant. Returns an empty profile (blank `businessName`) when none has been saved. Readable with `txn.read` — every user who prints an invoice needs it; PDFs are rendered on the client.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Business profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["BusinessProfile"];
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        /**
+         * Create or update the business profile
+         * @description Requires `setting.write`. Omit `logo` to keep the stored logo, send `null` or `""` to remove it, or send base64 (plain or a data URI) of a PNG or JPEG up to 256KB to replace it. The format is sniffed from the bytes, not trusted from the client. Audited without the image bytes.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BusinessProfileWrite"];
+                };
+            };
+            responses: {
+                /** @description Saved business profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["BusinessProfile"];
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                422: components["responses"]["ValidationError"];
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/document-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List saved document templates
+         * @description The tenant's saved templates for one document type, default first. Empty when none are saved — clients then print with the built-in Classic layout.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    docType?: "sales_invoice";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Templates */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["DocumentTemplate"][];
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/document-template/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create or update a document template
+         * @description Requires `setting.write`. Without `id` it creates; with `id` it updates (`docType` is then fixed). `isDefault: true` promotes the template and demotes the previous default; `false` never demotes. The first template saved for a document type becomes its default.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DocumentTemplateWrite"];
+                };
+            };
+            responses: {
+                /** @description Saved template */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["DocumentTemplate"];
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+                /** @description A template with this name already exists for this document type */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                422: components["responses"]["ValidationError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/document-template/set-default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a template the default for its document type
+         * @description Requires `setting.write`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        id: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description The new default template */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataEnvelope"] & {
+                            data?: components["schemas"]["DocumentTemplate"];
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+                422: components["responses"]["ValidationError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/document-template/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a document template
+         * @description Requires `setting.write`. Deleting the default promotes the most recently edited remaining template of that type (`promotedDefaultId`).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        id: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                id?: number;
+                                deleted?: boolean;
+                                promotedDefaultId?: number | null;
+                            };
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+                422: components["responses"]["ValidationError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        BusinessProfile: {
+            businessName?: string;
+            legalName?: string | null;
+            address?: string | null;
+            phone?: string | null;
+            email?: string | null;
+            website?: string | null;
+            panNo?: string | null;
+            vatNo?: string | null;
+            /**
+             * Format: byte
+             * @description Base64 PNG or JPEG, at most 256KB decoded.
+             */
+            logo?: string | null;
+            /** @enum {string|null} */
+            logoMime?: "image/png" | "image/jpeg" | null;
+            /** Format: date-time */
+            updatedAt?: string | null;
+        };
+        BusinessProfileWrite: {
+            businessName: string;
+            legalName?: string | null;
+            address?: string | null;
+            phone?: string | null;
+            email?: string | null;
+            website?: string | null;
+            panNo?: string | null;
+            vatNo?: string | null;
+            /** @description Omit to keep, null or "" to remove, base64 or data URI of a PNG or JPEG (max 256KB) to replace. */
+            logo?: string | null;
+        };
+        DocumentTemplate: {
+            id?: number;
+            /** @enum {string} */
+            docType?: "sales_invoice";
+            name?: string;
+            /** @enum {string} */
+            layout?: "classic" | "modern" | "minimal" | "compact" | "thermal";
+            isDefault?: boolean;
+            /** @description Client-owned styling and field toggles (accentColor, font, title, show* flags, terms, bankDetails, footerNote, ...). Opaque to the server; at most 16KB serialized. */
+            config?: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        DocumentTemplateWrite: {
+            /** @description Omit to create. */
+            id?: number;
+            /**
+             * @default sales_invoice
+             * @enum {string}
+             */
+            docType: "sales_invoice";
+            name: string;
+            /** @enum {string} */
+            layout: "classic" | "modern" | "minimal" | "compact" | "thermal";
+            /** @default false */
+            isDefault: boolean;
+            config?: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * @description One progress update from `GET /v1/bulk/jobs/{jobId}/events`. Deliberately
          *     the counters and nothing else — the full record is one `GET` away, and a
@@ -13871,13 +14108,6 @@ export interface components {
              *     cannot count towards the threshold that decides whether it applies.
              */
             freeDeliveryOver?: number | null;
-            /**
-             * @description Whether only signed-in shoppers may fill a cart and check out.
-             *     Published to shoppers as `StorefrontTenant.requireSignIn`, and
-             *     enforced by `POST /storefront/{tenantCode}/order`. False unless the
-             *     shop has turned it on - signed-in checkout is opt-in per shop.
-             */
-            requireSignIn?: boolean;
         };
         /** @description An id and a name for a settings dropdown. */
         StorefrontOption: {
@@ -14121,22 +14351,13 @@ export interface components {
                  */
                 name?: string | null;
                 /**
-                 * @description The phone number this shopper has *verified* by receiving a
-                 *     code on it. Null for a shopper who signed in by email - a number
-                 *     they typed at checkout is on their orders, never here.
+                 * @description The phone number this shopper has verified by receiving a code
+                 *     on it. A signed-in order is recorded against this number.
                  */
-                phone?: string | null;
-                /**
-                 * @description The email address this shopper has verified by receiving a code
-                 *     at it. Null for a shopper who signed in by phone.
-                 */
-                email?: string | null;
+                phone: string;
                 /**
                  * @description The delivery address on this shopper's most recent order, for
-                 *     checkout to offer as a default. Read from the order rather than
-                 *     stored on the shopper, so it is a suggestion and never a saved
-                 *     address a public endpoint could rewrite. Null before a first
-                 *     order.
+                 *     checkout to offer as a default. Null before a first order.
                  */
                 address?: string | null;
                 /** @description The landmark from that same order, when it had one. */
@@ -14189,23 +14410,18 @@ export interface components {
             /** @description `tenants.tenant_code`, the shop's URL segment. */
             code: string;
             /**
-             * @description True when only signed-in shoppers may fill a cart and check out.
-             *     False unless the merchant has turned it on: signed-in checkout is
-             *     opt-in per shop, and a shop that has not opted in takes guest
-             *     orders exactly as it always has. The storefront uses it to decide
-             *     whether to send a shopper to sign-in; `POST /order` enforces it
-             *     independently with 401, so a client that ignores it gains nothing.
+             * @description True when only signed-in shoppers may check out. This server
+             *     always sends false: guest checkout stays available, and the
+             *     storefront reads the flag rather than assuming it.
              */
             requireSignIn: boolean;
             /**
              * @description The channels this deployment can deliver a sign-in code on right
-             *     now: `email` when an email sender is configured, `phone` when an SMS
-             *     provider is. Empty means nobody can sign in - and, where
-             *     `requireSignIn` is true, that nobody can order. A property of the
-             *     server rather than the shop, repeated here so a storefront needs no
-             *     second request to draw its sign-in form.
+             *     now: `sms` when an SMS provider is configured, `whatsapp` when the
+             *     Cloud API credentials are set, `telegram` when the bot username
+             *     is set. Empty means nobody can prove a phone number.
              */
-            signInWith: ("email" | "phone")[];
+            signInWith: ("sms" | "whatsapp" | "telegram")[];
             /**
              * @description Display name. Currently echoes `code` - `tenants` has no name column,
              *     so this becomes a storefront preference when merchant settings ship.
